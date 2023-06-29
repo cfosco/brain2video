@@ -1,3 +1,9 @@
+# large brain data
+data/sub01/testing/*.pkl
+
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
