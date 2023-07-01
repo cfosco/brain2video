@@ -1,5 +1,9 @@
 # large brain data
-data/sub01/testing/*.pkl
+data/responses
+data/stimuli_mp4
+data/sub01
+data/sub02
+data/sub03
 
 
 
