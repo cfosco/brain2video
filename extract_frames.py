@@ -1,6 +1,8 @@
 '''Functions to extract frames from videos'''
 
 import os
+import argparse
+from tqdm import tqdm
 
 
 def extract_frames_for_all_videos(video_path: str, output_path: str, fps: int = 15):
@@ -11,7 +13,10 @@ def extract_frames_for_all_videos(video_path: str, output_path: str, fps: int = 
         output_path (str): Path to directory where frames will be saved.
         fps (int, optional): Frame rate. Defaults to 1.
     """
-    for video in os.listdir(video_path):
+
+    print(f"Extracting frames from videos in {video_path} and saving them in {output_path}.")
+
+    for video in tqdm(os.listdir(video_path)):
         if video.endswith('.mp4'):
             video_name = video.split('.')[0]
             vid_p = os.path.join(video_path, video)
@@ -32,6 +37,22 @@ def extract_frames(video_path: str, output_path: str, fps: int = 1):
 
 
 if __name__ == "__main__":
-    video_path = './data/10_videos_for_reconstruction_test'
-    output_path = './data/10_videos_for_reconstruction_test/frames'
-    extract_frames_for_all_videos(video_path, output_path)
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--video_path",
+        type=str,
+        help="path to folder of videos to extract frames from",
+        default='./data/stimuli/mp4',
+    )
+
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        help="path to folder where frames will be saved",
+        default='./data/stimuli/frames',
+    )
+
+    args = parser.parse_args()
+    extract_frames_for_all_videos(args.video_path, args.output_path)
