@@ -1,6 +1,6 @@
 # large brain data
 data/responses
-data/stimuli_mp4
+data/stimuli/
 data/sub*
 
 
