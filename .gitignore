@@ -1,6 +1,6 @@
 # large brain data
 data/responses
-data/stimuli/
+data/stimuli
 data/sub*
 cache/
 
