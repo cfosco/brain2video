@@ -1,7 +1,28 @@
 import numpy as np
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
+import os
+import pickle as pkl
 
+
+
+def load_all_fmri_for_subject(path_to_subject_data: str) -> dict:
+    """
+    Load all fmri data for a subject into a dict with brain locations as keys
+    """
+
+    fmri_data = {}
+
+    for p in os.listdir(path_to_subject_data):
+        if '56789' not in p: continue
+        
+        brain_region = p.split('_')[0]
+
+        with open(os.path.join(path_to_subject_data, p), 'rb') as f:
+            data = pkl.load(f)
+            fmri_data[brain_region] = data
+
+    return fmri_data
 
 def compute_tsne_embeddings(data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = 'repetitions') -> np.ndarray:
     """
@@ -35,3 +56,4 @@ def t_sne_visualization(data: dict, perplexity: int = 50, n_iter: int = 3000, av
     plt.xlabel('t-sne dim 1')
     plt.ylabel('t-sne dim 2')
     plt.show()
+
