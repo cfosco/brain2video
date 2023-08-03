@@ -57,3 +57,46 @@ def t_sne_visualization(data: dict, perplexity: int = 50, n_iter: int = 3000, av
     plt.ylabel('t-sne dim 2')
     plt.show()
 
+
+
+def transform_vids_to_gifs(path_to_vids='data/stimuli/mp4', path_to_gifs='data/stimuli/gif', size=128):
+    from moviepy.editor import VideoFileClip
+    from moviepy.video.fx.all import speedx
+    from pygifsicle import optimize
+    from PIL import Image
+
+    os.makedirs(path_to_gifs, exist_ok=True)
+
+    # Get list of all files
+    all_files = os.listdir(path_to_vids)
+
+    # Filter out the video files
+    video_files = [file for file in all_files if file.endswith('.mp4')]
+
+    # Process each video file
+    for video_file in sorted(video_files):
+        print(f'Processing {video_file}...')
+
+        # Load the video
+        video_clip = VideoFileClip(os.path.join(path_to_vids, video_file))
+
+        # Speed up clip (reduces frames)
+        video_clip = speedx(video_clip, factor=4)
+
+        # Reduce resolution
+        video_clip = video_clip.resize(height=size)
+        
+        # Get the video file name without extension
+        video_name = os.path.splitext(video_file)[0]
+
+        # Create a gif file path
+        gif_file_path = os.path.join(path_to_gifs, f"{video_name}.gif")
+
+        # Convert to gif and save
+        video_clip.write_gif(gif_file_path, program='ffmpeg', opt='optimizeplus', fuzz=5)
+
+        # Optimize the gif file
+        # optimize(gif_file_path)
+
+
+    print('All videos are converted to GIFs.')
