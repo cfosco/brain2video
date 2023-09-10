@@ -5,7 +5,10 @@ data/sub*
 cache/
 prompt-to-prompt/
 
-
+# Generations
+./oracle_gens/*
+./reconstructions/*
+./dump
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
