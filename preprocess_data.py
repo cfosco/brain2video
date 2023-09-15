@@ -1,4 +1,5 @@
 # Python file to generate training examples for the brain fmri to caption problem
+# DEPRECATED
 
 import os
 import sys
