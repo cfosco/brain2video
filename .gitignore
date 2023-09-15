@@ -1,13 +1,17 @@
 # large brain data
 data/responses
 data/stimuli
-data/sub*
+data/betas
+data/target_vectors
+data/new_tsnes_from_ben_as_arr
+data/new_tsnes_from_ben_as_dict
 cache/
 prompt-to-prompt/
 
 # Generations
 ./oracle_gens/*
 ./reconstructions/*
+./estimated_vectors/*
 ./dump
 
 # Byte-compiled / optimized / DLL files
