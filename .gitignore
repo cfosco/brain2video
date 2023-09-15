@@ -5,14 +5,17 @@ data/betas
 data/target_vectors
 data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
+
+# Other
 cache/
 prompt-to-prompt/
+./dump
+bokeh_plot.html
 
 # Generations
 ./oracle_gens/*
 ./reconstructions/*
 ./estimated_vectors/*
-./dump
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
