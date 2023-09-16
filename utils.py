@@ -86,15 +86,30 @@ def transform_vids_to_gifs(path_to_vids='data/stimuli/mp4', path_to_gifs='data/s
 
 
 def frames_to_vid(frames, output_video_path, fps=30):
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     h, w, c = frames[0].shape
-    video_writer = cv2.VideoWriter(output_video_path, fourcc, fps=fps, frameSize=(w, h))
-    for i in range(len(frames)):
-        img = cv2.cvtColor(frames[i], cv2.COLOR_RGB2BGR)
-        video_writer.write(img)
-    
-    video_writer.release()
+
+    def write_video(codec):
+        video_writer = cv2.VideoWriter(output_video_path, codec, fps=fps, frameSize=(w, h))
+        
+        # Check if video writer is initialized
+        if not video_writer.isOpened():
+            raise ValueError("Video writer could not be initialized.")
+        
+        for frame in frames:
+            img = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(img)
+        video_writer.release()
+
+    try:
+        # First, attempt to use avc1 codec
+        fourcc_avc1 = cv2.VideoWriter_fourcc(*"avc1")
+        write_video(fourcc_avc1)
+        print("Video written using avc1 codec.")
+    except:
+        # If that fails, fall back to mp4v codec
+        fourcc_mp4v = cv2.VideoWriter_fourcc(*"mp4v")
+        write_video(fourcc_mp4v)
+        print("Video written using mp4v codec.")
 
 def vid_to_gif(video_filepath, output_gif_filepath, size=256):
     

@@ -39,9 +39,8 @@ def main():
                         )
 
     parser.add_argument('--use_gt_vecs',
-                        type=bool,
+                        action='store_true',
                         help='Whether to use ground truth conditioning vectors',
-                        default=False
                         )
 
     args = parser.parse_args()
@@ -59,7 +58,13 @@ def main():
         filename = 'preds_test.npy'
     
     # Load predicted latents
-    z = np.load(os.path.join(args.z_path, filename))
+    if args.use_gt_vecs:
+        print("Using ground truth latents")
+        z_path = './data/target_vectors/z_zeroscope'
+        z = [np.load(os.path.join(z_path, f'{n:04d}.npy')) for n in range(1,len(os.listdir(z_path))+1)]
+        z = np.array(z)
+    else:
+        z = np.load(os.path.join(args.z_path, filename))
 
     # Reshape latents to expected shape: (b c f w h) with c = 4, f = 15
     z = rearrange(z, 'b (f c w h) -> b c f w h', f=15, c=4, w=33, h=33)
@@ -68,7 +73,12 @@ def main():
     print('z.shape',z.shape)
 
     # Load conditioning vectors
-    c = np.load(os.path.join(args.c_path, filename))
+    if args.use_gt_vecs:
+        c_path = './data/target_vectors/c_zeroscope'
+        c = [np.load(os.path.join(c_path, f'{n:04d}.npy')) for n in range(1,len(os.listdir(c_path))+1)]
+        c = np.array(c)
+    else:
+        c = np.load(os.path.join(args.c_path, filename))
     
     # Reshape cond vectors
     c = rearrange(c, 'b (k l) -> b k l', k=77)
@@ -78,10 +88,11 @@ def main():
     for i in range(len(z)):
     
         # Reconstruct videos
-        print("Reconstructing video", i)
+        print("Reconstructing video", i+1)
         rec_vid_frames =  pipe(video = z[i], 
                         prompt_embeds = c[i].unsqueeze(0), 
-                        strength = 0.3, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. 
+                        num_inference_steps=50,
+                        strength = 0.2, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
                         ).frames
         
         print("rec_vid_frames len", len(rec_vid_frames), "rec_vid_frames[0] shape", rec_vid_frames[0].shape)
