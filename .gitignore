@@ -180,3 +180,4 @@ cython_debug/
 
 data/**/*.pkl
 data/stimuli_mp4.tar.gz
+data/stimuli/
