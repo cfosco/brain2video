@@ -156,4 +156,6 @@ dependencies:
     - urllib3==2.0.4
     - wcwidth==0.2.6
     - yarl==1.9.2
-prefix: /home/camilo/anaconda3/envs/b2v
+    - transformers
+    - opencv-python
+    - moviepy
