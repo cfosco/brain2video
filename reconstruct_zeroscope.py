@@ -17,19 +17,19 @@ def main():
     parser.add_argument('--z_path', 
                         type=str, 
                         help='Path to predicted latents npy file', 
-                        default='./estimated_vectors/WB_z_zeroscope'
+                        default='./estimated_vectors/regressor:mlp_fmritype:betas_rois:V1v-V1d-V2v-V2d-V3v-V3d-hV4_sub01_z_zeroscope'
                         )
 
     parser.add_argument('--c_path',
                         type=str,
                         help='Path to predicted conditioning vectors npy file',
-                        default='./estimated_vectors/WB_c_zeroscope'
+                        default='./estimated_vectors/regressor:mlp_fmritype:betas_rois:EBA-PPA-FFA-OFA-STS-RSC-TOS-LOC_sub01_c_zeroscope'
                         )
 
     parser.add_argument('--output_path',
                         type=str,
                         help='Output path for reconstructed videos',
-                        default='./reconstructions/whole_brain'
+                        default='./reconstructions/separate_areas_2'
                         )       
     
     parser.add_argument('--set',
@@ -54,14 +54,16 @@ def main():
 
     if args.set == 'train':
         filename = 'preds_train.npy'
+        idx_start = 1
     elif args.set == 'test':
         filename = 'preds_test.npy'
+        idx_start = 1001
     
     # Load predicted latents
     if args.use_gt_vecs:
         print("Using ground truth latents")
         z_path = './data/target_vectors/z_zeroscope'
-        z = [np.load(os.path.join(z_path, f'{n:04d}.npy')) for n in range(1,len(os.listdir(z_path))+1)]
+        z = [np.load(os.path.join(z_path, f'{n:04d}.npy')) for n in range(idx_start,len(os.listdir(z_path))+1)]
         z = np.array(z)
     else:
         z = np.load(os.path.join(args.z_path, filename))
@@ -75,7 +77,7 @@ def main():
     # Load conditioning vectors
     if args.use_gt_vecs:
         c_path = './data/target_vectors/c_zeroscope'
-        c = [np.load(os.path.join(c_path, f'{n:04d}.npy')) for n in range(1,len(os.listdir(c_path))+1)]
+        c = [np.load(os.path.join(c_path, f'{n:04d}.npy')) for n in range(idx_start,len(os.listdir(c_path))+1)]
         c = np.array(c)
     else:
         c = np.load(os.path.join(args.c_path, filename))
@@ -88,11 +90,11 @@ def main():
     for i in range(len(z)):
     
         # Reconstruct videos
-        print("Reconstructing video", i+1)
+        print("Reconstructing video", idx_start+i)
         rec_vid_frames =  pipe(video = z[i], 
                         prompt_embeds = c[i].unsqueeze(0), 
                         num_inference_steps=50,
-                        strength = 0.2, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+                        strength = 0.9, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
                         ).frames
         
         print("rec_vid_frames len", len(rec_vid_frames), "rec_vid_frames[0] shape", rec_vid_frames[0].shape)
@@ -102,8 +104,8 @@ def main():
         gif_path = os.path.join(args.output_path, 'gif')
         os.makedirs(gif_path, exist_ok=True)
         
-        frames_to_vid(rec_vid_frames, os.path.join(vid_path, f'{i+1:04d}.mp4'), fps=15)
-        vid_to_gif(os.path.join(vid_path, f'{i+1:04d}.mp4'), os.path.join(gif_path, f'{i+1:04d}.gif'), size=268)
+        frames_to_vid(rec_vid_frames, os.path.join(vid_path, f'{idx_start+i:04d}.mp4'), fps=5)
+        vid_to_gif(os.path.join(vid_path, f'{idx_start+i:04d}.mp4'), os.path.join(gif_path, f'{idx_start+i:04d}.gif'), size=264)
 
 
 if __name__ == '__main__':
