@@ -40,22 +40,26 @@ class HimalayaRidgeRegressor:
 class MLPRegressor(nn.Module):
     """Simple MLP regressor with 1 hidden layer"""
     
-    def __init__(self, input_shape, output_shape) -> None:
+    def __init__(self, input_shape, output_shape, hidden_size=10000) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(input_shape, 100)
-        self.fc2 = nn.Linear(100, output_shape)
+        print("Initializing MLPRegressor with: ")
+        print(f"Input shape: {input_shape}")
+        print(f"Output shape: {output_shape}")
+        print(f"Hidden size: {hidden_size}")
+        self.fc1 = nn.Linear(input_shape, hidden_size)
+        self.norm = nn.BatchNorm1d(hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_shape)
         self.act = nn.GELU()
-        self.norm = nn.BatchNorm1d(100)
 
     def forward(self, x):
 
         x = self.fc1(x)
         x = self.act(x)
-        # x = self.norm(x)
+        x = self.norm(x)
         x = self.fc2(x)
         return x
 
-    def fit(self, X, y, batch_size=100, opt='adam', epochs=500, lr=0.001, verbose=True, use_tqdm=False):
+    def fit(self, X, y, batch_size=200, opt='adam', epochs=1000, lr=0.001, verbose=True, use_tqdm=False):
         """Training function with a set Adam optimizer"""
         self.train()
         if opt == 'adam':
@@ -68,7 +72,9 @@ class MLPRegressor(nn.Module):
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X).float().to('cuda')
         if not isinstance(y, torch.Tensor):
-            y = torch.tensor(y).float().to('cuda')       
+            y = torch.tensor(y).float().to('cuda')
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=verbose)
 
         for epoch in range(epochs):
             if use_tqdm:
@@ -79,7 +85,6 @@ class MLPRegressor(nn.Module):
                 optimizer.zero_grad()
                 batch_X = X[i:i+batch_size]
                 batch_y = y[i:i+batch_size]
-                # print dtypes
                 preds = self(batch_X)
                 loss = criterion(preds, batch_y)
                 loss.backward()
@@ -89,6 +94,8 @@ class MLPRegressor(nn.Module):
             if verbose:
                 if epoch % 10 == 0:
                     print(f'Epoch {epoch} Loss {loss.item()}')
+            scheduler.step(loss)
+
 
     def predict(self, X):
         """Predict function"""
@@ -113,7 +120,7 @@ def main():
         "--target",
         required=True,
         type=str,
-        help="Target vector to regress. One of z_zeroscope, c_zeroscope",
+        help="Target vector to regress. One of z_zeroscope, c_zeroscope, blip",
     )
 
     parser.add_argument(
@@ -158,7 +165,7 @@ def main():
     targets_path = f'data/target_vectors/{target}'
 
     ## Build method string
-    method = f'regressor:{regressor}_fmritype:{fmri_type}_rois:{"-".join(roi)}'
+    method = f'regressor:{regressor}withscheduler_fmritype:{fmri_type}_rois:{"-".join(roi)}'
 
     ## Load train and test input features
     fmri_feat_train, fmri_feat_test = load_boldmoments_fmri(fmri_path, roi=roi)
@@ -215,13 +222,19 @@ def main():
     os.makedirs(save_path, exist_ok=True)
     np.save(f'{save_path}/preds_train.npy', preds_train)
     np.save(f'{save_path}/preds_test.npy', preds_test)
+    
+
 
     ## Compute test metrics
-    metrics = compute_metrics(target_test, preds_test, verbose=True)
+    print("Train metrics:")
+    train_metrics = compute_metrics(target_train, preds_train, verbose=True)
+
+    print("Test metrics:")
+    test_metrics = compute_metrics(target_test, preds_test, verbose=True)
 
     ## Save metrics dict as pkl
-    with open(f'{save_path}/metrics:{metrics}.pkl', 'wb') as f:
-        pkl.dump(metrics, f)
+    with open(f'{save_path}/test_metrics:{test_metrics}.pkl', 'wb') as f:
+        pkl.dump(test_metrics, f)
 
 
 
