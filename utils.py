@@ -1,17 +1,18 @@
-import numpy as np
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
 import os
 import pickle as pkl
-import cv2
-from himalaya.scoring import correlation_score
-from PIL import Image
-import torch
 
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import PIL
+import torch
+from himalaya.scoring import correlation_score
 from moviepy.editor import VideoFileClip
 from moviepy.video.fx.all import speedx
-# from pygifsicle import optimize
+from PIL import Image
+from sklearn.manifold import TSNE
 
+# from pygifsicle import optimize
 
 
 def load_all_fmri_for_subject(path_to_subject_data: str) -> dict:
@@ -22,67 +23,79 @@ def load_all_fmri_for_subject(path_to_subject_data: str) -> dict:
     fmri_data = {}
 
     for p in os.listdir(path_to_subject_data):
-        if '56789' not in p: continue
-        
-        brain_region = p.split('_')[0]
+        if "56789" not in p:
+            continue
 
-        with open(os.path.join(path_to_subject_data, p), 'rb') as f:
+        brain_region = p.split("_")[0]
+
+        with open(os.path.join(path_to_subject_data, p), "rb") as f:
             data = pkl.load(f)
             fmri_data[brain_region] = data
 
     return fmri_data
 
 
-def compute_tsne_embeddings(data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = 'repetitions') -> np.ndarray:
+def compute_tsne_embeddings(
+    data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = "repetitions"
+) -> np.ndarray:
     """
     Compute t-sne embeddings of the data
     """
 
-    if average_over == 'videos':
+    if average_over == "videos":
         dim = 0
-    elif average_over == 'repetitions':
+    elif average_over == "repetitions":
         dim = 1
-    elif average_over == 'voxels':
+    elif average_over == "voxels":
         dim = 2
     else:
         raise ValueError('average_over must be one of "videos", "repetitions" or "voxels"')
 
-    avg_fmri = np.mean(data['train_data'], axis=dim)
+    avg_fmri = np.mean(data["train_data"], axis=dim)
     tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, n_iter=n_iter)
     tsne_results = tsne.fit_transform(avg_fmri)
 
     return tsne_results
 
-def t_sne_visualization(data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = 'repetitions') -> None:
+
+def t_sne_visualization(
+    data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = "repetitions"
+) -> None:
     """
     Plot t-sne visualization of the data
     """
 
-    tsne_results = compute_tsne_embeddings(data, perplexity=perplexity, n_iter=n_iter, average_over=average_over)
+    tsne_results = compute_tsne_embeddings(
+        data, perplexity=perplexity, n_iter=n_iter, average_over=average_over
+    )
 
     plt.figure(figsize=(10, 10))
     plt.scatter(tsne_results[:, 0], tsne_results[:, 1])
-    plt.xlabel('t-sne dim 1')
-    plt.ylabel('t-sne dim 2')
+    plt.xlabel("t-sne dim 1")
+    plt.ylabel("t-sne dim 2")
     plt.show()
 
 
-
-def transform_vids_to_gifs(path_to_vids='data/stimuli/mp4', path_to_gifs='data/stimuli/gif', size=128):
-
+def transform_vids_to_gifs(
+    path_to_vids="data/stimuli/mp4", path_to_gifs="data/stimuli/gif", size=128
+):
     os.makedirs(path_to_gifs, exist_ok=True)
 
     # Get list of all files
     all_files = os.listdir(path_to_vids)
 
     # Filter out the video files
-    video_files = [file for file in all_files if file.endswith('.mp4')]
+    video_files = [file for file in all_files if file.endswith(".mp4")]
 
     # Process each video file
     for video_file in sorted(video_files):
-        vid_to_gif(os.path.join(path_to_vids, video_file), os.path.join(path_to_gifs, video_file.replace('mp4','.gif')), size=size)
+        vid_to_gif(
+            os.path.join(path_to_vids, video_file),
+            os.path.join(path_to_gifs, video_file.replace("mp4", ".gif")),
+            size=size,
+        )
 
-    print('All videos are converted to GIFs.')
+    print("All videos are converted to GIFs.")
 
 
 def frames_to_vid(frames, output_video_path, fps=30):
@@ -90,11 +103,11 @@ def frames_to_vid(frames, output_video_path, fps=30):
 
     def write_video(codec):
         video_writer = cv2.VideoWriter(output_video_path, codec, fps=fps, frameSize=(w, h))
-        
+
         # Check if video writer is initialized
         if not video_writer.isOpened():
             raise ValueError("Video writer could not be initialized.")
-        
+
         for frame in frames:
             img = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             video_writer.write(img)
@@ -105,14 +118,14 @@ def frames_to_vid(frames, output_video_path, fps=30):
         fourcc_avc1 = cv2.VideoWriter_fourcc(*"avc1")
         write_video(fourcc_avc1)
         print("Video written using avc1 codec.")
-    except:
+    except Exception:
         # If that fails, fall back to mp4v codec
         fourcc_mp4v = cv2.VideoWriter_fourcc(*"mp4v")
         write_video(fourcc_mp4v)
         print("Video written using mp4v codec.")
 
+
 def vid_to_gif(video_filepath, output_gif_filepath, size=256):
-    
     # print(f'Processing {video_filepath}...')
 
     # Load the video
@@ -125,11 +138,9 @@ def vid_to_gif(video_filepath, output_gif_filepath, size=256):
     video_clip = video_clip.resize(height=size)
 
     # Convert to gif and save
-    video_clip.write_gif(output_gif_filepath, 
-                         program='ffmpeg', 
-                         opt='optimizeplus', 
-                         fuzz=5,
-                         verbose=False)
+    video_clip.write_gif(
+        output_gif_filepath, program="ffmpeg", opt="optimizeplus", fuzz=5, verbose=False
+    )
 
     # Optimize the gif file
     # optimize(gif_file_path)
@@ -141,33 +152,33 @@ def prompt_list_from_boldmoments_annots(annots):
     #             prompt = a['text_descriptions'][c]
     pass
 
-def compute_metrics(targets, preds, verbose=True):
 
+def compute_metrics(targets, preds, verbose=True):
     # Compute MSE
-    mse = np.mean((targets - preds)**2)
+    mse = np.mean((targets - preds) ** 2)
 
     # Compute MAE
     mae = np.mean(np.abs(targets - preds))
 
     # Compute r2
-    r2 = 1 - np.sum((targets - preds)**2) / np.sum((targets - np.mean(targets))**2)
+    r2 = 1 - np.sum((targets - preds) ** 2) / np.sum((targets - np.mean(targets)) ** 2)
 
     # Compute correlation score
-    corr = correlation_score(targets.T,preds.T).mean().item()
+    corr = correlation_score(targets.T, preds.T).mean().item()
 
     if verbose:
-        print(f'MSE: {mse}')
-        print(f'MAE: {mae}')
-        print(f'R2: {r2}')
-        print(f'Correlation: {corr}')
+        print(f"MSE: {mse}")
+        print(f"MAE: {mae}")
+        print(f"R2: {r2}")
+        print(f"Correlation: {corr}")
 
-    return {'mse': mse, 'mae': mae, 'r2': r2, 'corr': corr}
+    return {"mse": mse, "mae": mae, "r2": r2, "corr": corr}
 
 
 def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268):
     """
     Load image frames from subfolders into a torch tensor.
-    
+
     Args:
     - root_dir (str): Path to the root directory containing subfolders of frames.
 
@@ -179,48 +190,49 @@ def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268)
       h: height of the video
       w: width of the video
     """
-    
+
     # List all subfolders (videos)
-    video_folders = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
-    
+    video_folders = [
+        d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))
+    ]
+
     # Sort the folders for consistency
     video_folders.sort()
-    
+
     # Placeholder list to store all video tensors
     all_videos = []
-    
+
     for video_folder in video_folders:
         video_path = os.path.join(root_dir, video_folder)
-        
+
         # List all frames in the current video folder
-        frames = [f for f in os.listdir(video_path) if f.endswith(('.png', '.jpg', '.jpeg'))]
-        
+        frames = [f for f in os.listdir(video_path) if f.endswith((".png", ".jpg", ".jpeg"))]
+
         # Sort the frames for consistency
         frames.sort()
-        
+
         # Placeholder list to store all frame tensors for the current video
         video_frames = []
-        
+
         for frame in frames:
             frame_path = os.path.join(video_path, frame)
-            
+
             # Load the image using PIL and convert to RGB
-            img = Image.open(frame_path).convert('RGB')
-            
+            img = Image.open(frame_path).convert("RGB")
+
             # Convert the PIL image to a torch tensor
             tensor = torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0
-            
+
             video_frames.append(tensor)
-        
+
         # Stack all frame tensors for the current video
         video_tensor = torch.stack(video_frames, dim=0)
         all_videos.append(video_tensor)
-    
+
     # Stack all video tensors
     result_tensor = torch.stack(all_videos, dim=0)
-    
-    return result_tensor
 
+    return result_tensor
 
 
 def preprocess_video_for_vid2vid_pipeline(video):
@@ -274,14 +286,15 @@ def save_vectors_npy(vectors, save_path, video_names):
 
     # Save each target vector for each video as its own npy file
     for i in ran:
-        np.save(os.path.join(save_path, f'{video_names[i]}.npy'), vectors[i])
-
+        np.save(os.path.join(save_path, f"{video_names[i]}.npy"), vectors[i])
 
 
 def print_current_gpu_memory():
     t = torch.cuda.get_device_properties(0).total_memory / 1024**2
     r = torch.cuda.memory_reserved(0) / 1024**2
     a = torch.cuda.memory_allocated(0) / 1024**2
-    f = r-a  # free inside reserved
+    f = r - a  # free inside reserved
 
-    print(f"GPU Mem -- Total: {int(t)} MB, Reserved: {int(r)}, Allocated: {int(a)}, Free: {int(f)}")
+    print(
+        f"GPU Mem -- Total: {int(t)} MB, Reserved: {int(r)}, Allocated: {int(a)}, Free: {int(f)}"
+    )
