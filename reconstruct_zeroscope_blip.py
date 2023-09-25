@@ -20,16 +20,16 @@ def main():
                         default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_rois:WB_sub01_z_zeroscope'
                         )
 
-    parser.add_argument('--c_path',
+    parser.add_argument('--blip_path',
                         type=str,
                         help='Path to predicted conditioning vectors npy file',
-                        default='./estimated_vectors/regressor:mlp_fmritype:betas_rois:EBA-PPA-FFA-OFA-STS-RSC-TOS-LOC_sub01_c_zeroscope'
+                        default='./estimated_vectors/BLIP'
                         )
 
     parser.add_argument('--output_path',
                         type=str,
                         help='Output path for reconstructed videos',
-                        default='./reconstructions/WB_better_MLP'
+                        default='./reconstructions/WB_to_captions'
                         )       
     
     parser.add_argument('--set',
@@ -91,6 +91,9 @@ def main():
         c = np.array(c)
     else:
         c = np.load(os.path.join(args.c_path, filename))
+
+
+    # Load BLIP vecotrs
     
     # Reshape cond vectors
     c = rearrange(c, 'b (k l) -> b k l', k=77)
