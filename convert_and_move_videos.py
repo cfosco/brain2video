@@ -28,6 +28,8 @@ def build_command_list(paramDict, inputFile, outputFile):
         "yuv420p",
         "-r",
         paramDict["frame_rate"],
+        "-loglevel",
+        paramDict["log_level"],
         outputFile
         ]
     return commands_list
@@ -35,7 +37,8 @@ def build_command_list(paramDict, inputFile, outputFile):
 
 def convert_videos(mp4_dir, 
                    mp4_dir_converted, 
-                   start_end_idx=[1000,1102]
+                   start_end_idx=[1000,1102],
+                   reconvert_if_exists=False
                    ):
     
     '''Convert videos to h264'''
@@ -50,6 +53,7 @@ def convert_videos(mp4_dir,
     user_input_dict["crf"] = "1"
     user_input_dict["frame_size"] = "360x360"
     user_input_dict["frame_rate"] = "8"
+    user_input_dict["log_level"] = "error"
 
     # convert videos
     os.makedirs(mp4_dir_converted, exist_ok=True)
@@ -57,22 +61,34 @@ def convert_videos(mp4_dir,
     start_idx = start_end_idx[0]
     end_idx = start_end_idx[1]
     video_names = sorted(os.listdir(mp4_dir))
+
+    print("start_idx:", start_idx)
+    print("end_idx:", end_idx)
+    print("len(video_names):", len(video_names))
     for v in range(len(video_names)):
-        if v < start_idx or v >= end_idx[1]:
+        video_idx = int(video_names[v].split('_')[0])
+        if video_idx < start_idx or video_idx >= end_idx:
             continue
+
         input = os.path.join(mp4_dir, video_names[v])
         output = os.path.join(mp4_dir_converted, video_names[v])    
+
+        # skip if video already exists
+        if os.path.exists(output) and not reconvert_if_exists:
+            continue
+
         commands_list = build_command_list(user_input_dict, input, output)
+        print("Converting video:", video_names[v])
         if subprocess.run(commands_list).returncode == 0:
             print ("FFmpeg Script Ran Successfully")
         else:
             raise Exception("There was an error running your FFmpeg script")
     
 def move_to_nsf(path_to_videos, 
-                save_path_in_nsf = ' /data/vision/oliva/scratch/ejosephs/brainGen_eval/stimuli',
+                save_path_in_nsf = '/data/vision/oliva/scratch/ejosephs/brainGen_eval/stimuli/oracle_gens_zeroscope',
                 user = 'cfosco',
-                remote = 'visiongpu52.csail.mit.edu',
-                start_end_idx=[1000,1102]
+                remote = 'oliva-titanrtx-1',
+                start_end_idx=[1001,1103]
                 ):
     
     '''Scp the videos to the NSF server'''
@@ -85,11 +101,14 @@ def move_to_nsf(path_to_videos,
     end_idx = start_end_idx[1]
     video_names = sorted(os.listdir(path_to_videos))
     for v in range(len(video_names)):
-        if v < start_idx or v >= end_idx[1]:
+        video_idx = int(video_names[v].split('_')[0])
+        if video_idx < start_idx or video_idx >= end_idx:
             continue
         filename = video_names[v]
         if filename.endswith(".mp4") or filename.endswith(".gif"):
-            print(filename)
+            print("Moving video to NSF:", filename)
+            print("Command:", ['scp', os.path.join(path_to_videos, filename), 
+                            f'{user}@{remote}:{save_path_in_nsf}'])
             subprocess.run(['scp', os.path.join(path_to_videos, filename), 
                             f'{user}@{remote}:{save_path_in_nsf}'])
 
@@ -114,15 +133,15 @@ if __name__ == '__main__':
     
     parser.add_argument('--save_path_in_nsf',
                         type=str,
-                        default='/data/vision/oliva/scratch/ejosephs/brainGen_eval/stimuli',
+                        default='/data/vision/oliva/scratch/ejosephs/brainGen_eval/stimuli/oracle_gens_zeroscope',
                         help='path to save videos in NSF server')
 
     parser.add_argument('--start_end_idx',
                         required=False,
-                        default=[1000,1102],
+                        default=[1001,1103],
                         nargs="*",
                         type=int,
-                        help="start and end idx of the videos for which to extract target vectors")
+                        help="start and end idx of the videos to convert and move")
 
 
     args = parser.parse_args()

@@ -40,7 +40,7 @@ class HimalayaRidgeRegressor:
 class MLPRegressor(nn.Module):
     """Simple MLP regressor with 1 hidden layer"""
     
-    def __init__(self, input_shape, output_shape, hidden_size=10000) -> None:
+    def __init__(self, input_shape, output_shape, hidden_size=1000):
         super().__init__()
         print("Initializing MLPRegressor with: ")
         print(f"Input shape: {input_shape}")
@@ -51,6 +51,9 @@ class MLPRegressor(nn.Module):
         self.fc2 = nn.Linear(hidden_size, output_shape)
         self.act = nn.GELU()
 
+        # Print number of parameters
+        print(f"Number of parameters: {sum(p.numel() for p in self.parameters())}")
+
     def forward(self, x):
 
         x = self.fc1(x)
@@ -59,7 +62,7 @@ class MLPRegressor(nn.Module):
         x = self.fc2(x)
         return x
 
-    def fit(self, X, y, batch_size=200, opt='adam', epochs=1000, lr=0.001, verbose=True, use_tqdm=False):
+    def fit(self, X, y, X_test=None, y_test=None, batch_size=50, opt='adam', epochs=500, lr=0.001, verbose=True, use_tqdm=False):
         """Training function with a set Adam optimizer"""
         self.train()
         if opt == 'adam':
@@ -94,7 +97,21 @@ class MLPRegressor(nn.Module):
             if verbose:
                 if epoch % 10 == 0:
                     print(f'Epoch {epoch} Loss {loss.item()}')
+
+            # Compute validation error
+            if X_test is not None and y_test is not None:
+                if verbose and epoch % 10 == 0:
+                    with torch.no_grad():
+                        self.eval()
+                        preds_test = self(X_test)
+                        loss = criterion(preds_test, y_test)
+                        print(f'Epoch {epoch} Validation Loss {loss.item()}')
+                    self.train()
+
+                    
             scheduler.step(loss)
+
+
 
 
     def predict(self, X):
@@ -126,14 +143,14 @@ def main():
     parser.add_argument(
         "--fmritype",
         type=str,
-        default='betas',
-        help="fMRI signals to use as features. One of betas, betas_significant",
+        default='betas_impulse',
+        help="fMRI signals to use as features. One of betas_raw, betas_impulse",
     )
 
     parser.add_argument(
         "--roi",
         type=str,
-        default=['WB'],
+        default=['BMDGeneral'],
         nargs="*",
         help=f"ROIs to use as features. Use WB for whole brain, or a combination of ROIs, e.g. EBA PPA LOC. ROIs will be concatenated.",
     )
@@ -223,7 +240,6 @@ def main():
     np.save(f'{save_path}/preds_train.npy', preds_train)
     np.save(f'{save_path}/preds_test.npy', preds_test)
     
-
 
     ## Compute test metrics
     print("Train metrics:")
