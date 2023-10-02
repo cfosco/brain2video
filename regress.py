@@ -10,6 +10,8 @@ from utils import compute_metrics
 from torch import nn
 import torch
 from tqdm import tqdm
+import yaml
+import wandb
 
 class HimalayaRidgeRegressor:
     def __init__(self, alphas):
@@ -46,7 +48,7 @@ class MLPRegressor(nn.Module):
         print(f"Input shape: {input_shape}")
         print(f"Output shape: {output_shape}")
         print(f"Hidden size: {hidden_size}")
-        self.fc1 = nn.Linear(input_shape, hidden_size)
+        self.fc1 = nn.Linear(input_shape, hidden_size, )
         self.norm = nn.BatchNorm1d(hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_shape)
         self.act = nn.GELU()
@@ -62,11 +64,11 @@ class MLPRegressor(nn.Module):
         x = self.fc2(x)
         return x
 
-    def fit(self, X, y, X_test=None, y_test=None, batch_size=50, opt='adam', epochs=500, lr=0.001, verbose=True, use_tqdm=False):
+    def fit(self, X, y, X_test=None, y_test=None, batch_size=50, opt='adam', epochs=300, lr=0.001, verbose=True, use_tqdm=False):
         """Training function with a set Adam optimizer"""
         self.train()
         if opt == 'adam':
-            optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+            optimizer = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=1e-5)
         else:
             raise NotImplementedError("Optimizer not defined")
         criterion = nn.MSELoss().to('cuda')
@@ -76,6 +78,10 @@ class MLPRegressor(nn.Module):
             X = torch.tensor(X).float().to('cuda')
         if not isinstance(y, torch.Tensor):
             y = torch.tensor(y).float().to('cuda')
+        if X_test is not None and not isinstance(X_test, torch.Tensor):
+            X_test = torch.tensor(X_test).float().to('cuda')
+        if y_test is not None and not isinstance(y_test, torch.Tensor):
+            y_test = torch.tensor(y_test).float().to('cuda')
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=verbose)
 
@@ -128,70 +134,58 @@ class AutoGluonRegressor:
     pass
 
 
-def main():
+def main(args):
 
-    # Parsing arguments
-    parser = argparse.ArgumentParser()
+    # Load yaml config
+    # with open(args.config, 'r') as f:
+    #     config = yaml.load(f, Loader=yaml.FullLoader)
+    #     print(config)
 
-    parser.add_argument(
-        "--target",
-        required=True,
-        type=str,
-        help="Target vector to regress. One of z_zeroscope, c_zeroscope, blip",
-    )
+    config = args
 
-    parser.add_argument(
-        "--fmritype",
-        type=str,
-        default='betas_impulse',
-        help="fMRI signals to use as features. One of betas_raw, betas_impulse",
-    )
+    # Weights and biases setup
+    # wandb.login()
+    # wandb.init(project="brain2video", 
+    #             config=config)
 
-    parser.add_argument(
-        "--roi",
-        type=str,
-        default=['BMDGeneral'],
-        nargs="*",
-        help=f"ROIs to use as features. Use WB for whole brain, or a combination of ROIs, e.g. EBA PPA LOC. ROIs will be concatenated.",
-    )
 
-    parser.add_argument(
-        "--subject",
-        type=str,
-        default='sub01',
-        help="Subject for which fMRI data will be used. One of sub01, sub02,... , sub10",
-    )
-
-    parser.add_argument(
-        "--regressor",
-        type=str,
-        default='mlp',
-        help="Regressor to use. One of himalaya-ridge, autogluon, mlp",
-    )
-
-    args = parser.parse_args()
-    target = args.target
-    fmri_type = args.fmritype
-    roi = args.roi
-    subject = args.subject
-    regressor = args.regressor
+    target = config.target
+    fmri_type = config.fmritype
+    roi = config.roi
+    subject = config.subject
+    regressor = config.regressor
     backend = set_backend("torch_cuda")  # or "torch_cuda"
+
+    if config.avg_train_reps:
+        repeat_train = 1
+    else:
+        repeat_train = 3
 
     ## Paths to fMRI data (our input features) and vectors to regress (our output targets)
     fmri_path = f'data/{fmri_type}/{subject}'
     targets_path = f'data/target_vectors/{target}'
 
     ## Build method string
-    method = f'regressor:{regressor}withscheduler_fmritype:{fmri_type}_rois:{"-".join(roi)}'
-
+    method = f'regressor:{regressor}withscheduler_fmritype:{fmri_type}_rois:{"-".join(roi)}_avgtrainreps:{config.avg_train_reps}'
+    print("Method:", method)
     ## Load train and test input features
-    fmri_feat_train, fmri_feat_test = load_boldmoments_fmri(fmri_path, roi=roi)
+    if fmri_type == 'betas_impulse':
+        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_impulse(fmri_path, 
+                                                                         roi=roi, 
+                                                                         avg_train_reps=config.avg_train_reps)
+    elif fmri_type == 'betas_raw':
+        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_raw(fmri_path, 
+                                                                     roi=roi,
+                                                                     avg_train_reps=config.avg_train_reps)
+    
+    
+    
     if regressor == 'himalaya-ridge':
         fmri_feat_train = backend.asarray(fmri_feat_train)
         fmri_feat_test = backend.asarray(fmri_feat_test)
 
     ## Load train and test output targets
-    target_train, target_test = load_target_vectors(targets_path)
+    target_train, target_test = load_target_vectors(targets_path, repeat_train=repeat_train)
     if regressor == 'himalaya-ridge':
         target_train = backend.asarray(target_train)
         target_test = backend.asarray(target_test)
@@ -230,7 +224,7 @@ def main():
     print(f'Target train shape: {target_train.shape}')
 
     print("Fitting model")
-    pipeline.fit(fmri_feat_train, target_train)
+    pipeline.fit(fmri_feat_train, target_train, X_test=fmri_feat_test, y_test=target_test)
     preds_train = pipeline.predict(fmri_feat_train)
     preds_test = pipeline.predict(fmri_feat_test)
     
@@ -252,9 +246,49 @@ def main():
     with open(f'{save_path}/test_metrics:{test_metrics}.pkl', 'wb') as f:
         pkl.dump(test_metrics, f)
 
+def predict_and_average(pipeline, X_with_reps, n_reps=10):
+    '''Makes predictions with different reps as input and averages the results'''
+    
+    from einops import rearrange
+
+    preds = pipeline.predict(X_with_reps)
+    
+    preds = rearrange(preds, '(b r) n -> b r n', r=n_reps)
+    preds = np.mean(preds, axis=1)
+
+    return preds
 
 
-def load_boldmoments_fmri(path_to_subject_data: str, roi: list) -> None:
+
+def load_boldmoments_betas_impulse(path_to_subject_data: str, roi: list, avg_train_reps=True) -> None:
+    
+    betas_impulse_train_list = []
+    betas_impulse_test_list = []
+
+    for r in roi:
+        pkl_name = f'{r}_betas-GLMsingle_type-typed_z=1.pkl'
+        with open(os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb') as f:
+            data = pkl.load(f)
+        
+        if avg_train_reps:
+            betas_impulse_train_list.append( np.mean(data['train_data_allvoxel'], axis=1))
+        else:
+            # Concatenate all repetitions into dim 0
+            data_train = np.concatenate([data['train_data_allvoxel'][:,i,:] for i in range(data['train_data_allvoxel'].shape[1])])
+            betas_impulse_train_list.append(data_train)
+
+        betas_impulse_test_list.append( np.mean(data['test_data_allvoxel'], axis=1))
+
+        # TODO: add noise ceiling
+
+    betas_impulse_train_npy = np.concatenate(betas_impulse_train_list, axis=1)
+    betas_impulse_test_npy = np.concatenate(betas_impulse_test_list, axis=1)
+
+
+    return betas_impulse_train_npy, betas_impulse_test_npy
+
+
+def load_boldmoments_betas_raw(path_to_subject_data: str, roi: list, avg_train_reps=True) -> None:
     """
     load fMRI data into list that can be used for regression. 
     List should contain N elements, corresponding to the N videos in the selected subset. 
@@ -269,8 +303,10 @@ def load_boldmoments_fmri(path_to_subject_data: str, roi: list) -> None:
             data = pkl.load(f)
 
         # Average over repetitions
-        fmri_features_train_list.append( np.mean(data['train_data'], axis=1))
-        fmri_features_test_list.append( np.mean(data['test_data'], axis=1))
+        if avg_train_reps:
+            fmri_features_train_list.append( np.mean(data['train_data'], axis=1))
+        else:
+            fmri_features_train_list.append( data['train_data'])
 
     fmri_features_train_npy = np.concatenate(fmri_features_train_list, axis=1) 
     fmri_features_test_npy = np.concatenate(fmri_features_test_list, axis=1)
@@ -279,7 +315,7 @@ def load_boldmoments_fmri(path_to_subject_data: str, roi: list) -> None:
 
 
 
-def load_target_vectors(path_to_target_vectors: str) -> None:
+def load_target_vectors(path_to_target_vectors: str, repeat_train=1) -> None:
     """
     Load target vectors for a given subject
     """
@@ -294,11 +330,67 @@ def load_target_vectors(path_to_target_vectors: str) -> None:
         else:
             target_test.append(np.load(f'{path_to_target_vectors}/{target}'))
 
-    target_train = np.array(target_train)
+    target_train = np.array(target_train*repeat_train)
     target_test = np.array(target_test)
+
+    
     return target_train, target_test
 
 
 
 if __name__ == "__main__":
-    main()
+
+    # Argument handling
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--target",
+        required=True,
+        type=str,
+        help="Target vector to regress. One of z_zeroscope, c_zeroscope, blip",
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default='config/regression_config.yaml',
+        help="Path to config file",
+    )
+
+    parser.add_argument(
+        "--fmritype",
+        type=str,
+        default='betas_impulse',
+        help="fMRI signals to use as features. One of betas_raw, betas_impulse",
+    )
+
+    parser.add_argument(
+        "--roi",
+        type=str,
+        default=['BMDgeneral'],
+        nargs="*",
+        help=f"ROIs to use as features. Use WB for whole brain, or a combination of ROIs, e.g. EBA PPA LOC. ROIs will be concatenated.",
+    )
+
+    parser.add_argument(
+        "--subject",
+        type=str,
+        default='sub01',
+        help="Subject for which fMRI data will be used. One of sub01, sub02,... , sub10",
+    )
+
+    parser.add_argument(
+        "--regressor",
+        type=str,
+        default='mlp',
+        help="Regressor to use. One of himalaya-ridge, autogluon, mlp",
+    )
+
+    parser.add_argument(
+        "--avg_train_reps",
+        type=bool,
+        default=False,
+        help="Whether to use individual reps or averaged ones during training",
+    )
+    args = parser.parse_args()
+    main(args)

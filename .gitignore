@@ -2,9 +2,11 @@
 data/responses
 data/stimuli
 data/betas
+data/betas_impulse
 data/target_vectors
 data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
+data/tsne_results
 
 # Other
 cache/

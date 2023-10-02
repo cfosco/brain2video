@@ -11,6 +11,7 @@ from moviepy.editor import VideoFileClip
 from moviepy.video.fx.all import speedx
 from PIL import Image
 from sklearn.manifold import TSNE
+from tqdm import tqdm
 
 # from pygifsicle import optimize
 
@@ -77,21 +78,25 @@ def t_sne_visualization(
 
 
 def transform_vids_to_gifs(
-    path_to_vids="data/stimuli/mp4", path_to_gifs="data/stimuli/gif", size=128
+    path_to_vids="data/stimuli/mp4", 
+    path_to_gifs="data/stimuli/gif", 
+    size=128,
+    start_from=0
 ):
     os.makedirs(path_to_gifs, exist_ok=True)
 
     # Get list of all files
-    all_files = os.listdir(path_to_vids)
+    all_files = sorted(os.listdir(path_to_vids))
 
     # Filter out the video files
     video_files = [file for file in all_files if file.endswith(".mp4")]
+    video_files = video_files[start_from:]
 
     # Process each video file
-    for video_file in sorted(video_files):
+    for video_file in tqdm(sorted(video_files)):
         vid_to_gif(
             os.path.join(path_to_vids, video_file),
-            os.path.join(path_to_gifs, video_file.replace("mp4", ".gif")),
+            os.path.join(path_to_gifs, video_file.replace(".mp4", ".gif")),
             size=size,
         )
 
@@ -139,7 +144,12 @@ def vid_to_gif(video_filepath, output_gif_filepath, size=256):
 
     # Convert to gif and save
     video_clip.write_gif(
-        output_gif_filepath, program="ffmpeg", opt="optimizeplus", fuzz=5, verbose=False
+        output_gif_filepath, 
+        program="ffmpeg", 
+        opt="optimizeplus", 
+        fuzz=5, 
+        # verbose=False, 
+        logger=None
     )
 
     # Optimize the gif file

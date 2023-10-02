@@ -36,7 +36,7 @@ def build_command_list(paramDict, inputFile, outputFile):
 
 
 def convert_videos(mp4_dir, 
-                   mp4_dir_converted, 
+                   mp4_dir_converted=None, 
                    start_end_idx=[1000,1102],
                    reconvert_if_exists=False
                    ):
@@ -55,6 +55,9 @@ def convert_videos(mp4_dir,
     user_input_dict["frame_rate"] = "8"
     user_input_dict["log_level"] = "error"
 
+    if mp4_dir_converted is None:
+        mp4_dir_converted = mp4_dir + "_h264"
+
     # convert videos
     os.makedirs(mp4_dir_converted, exist_ok=True)
 
@@ -66,7 +69,7 @@ def convert_videos(mp4_dir,
     print("end_idx:", end_idx)
     print("len(video_names):", len(video_names))
     for v in range(len(video_names)):
-        video_idx = int(video_names[v].split('_')[0])
+        video_idx = int(video_names[v][:4])
         if video_idx < start_idx or video_idx >= end_idx:
             continue
 
@@ -101,7 +104,7 @@ def move_to_nsf(path_to_videos,
     end_idx = start_end_idx[1]
     video_names = sorted(os.listdir(path_to_videos))
     for v in range(len(video_names)):
-        video_idx = int(video_names[v].split('_')[0])
+        video_idx = int(video_names[v][:4])
         if video_idx < start_idx or video_idx >= end_idx:
             continue
         filename = video_names[v]
@@ -124,7 +127,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--mp4_dir_converted', 
                         type=str, 
-                        default='./oracle_gens/mp4_h264', 
+                        default=None, 
                         help='path to converted mp4 directory')
 
     parser.add_argument('--to_nsf', 

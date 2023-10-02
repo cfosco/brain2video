@@ -114,7 +114,7 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
                 videos[v, f] = norm_frame
     
         # Get latent embedding targets
-        batch_of_zs = videos_to_latent_vectors(videos, pipe)
+        batch_of_zs = videos_to_latent_vectors(videos, pipe, return_flattened=False)
 
         # Save targets
         video_names = video_folders[b*batch_size:(b+1)*batch_size]
@@ -136,7 +136,7 @@ def get_and_save_c_targets(pipe, path_to_annots='./data/annotations.json', batch
         save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
 
 
-def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60):
+def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattened=True):
     nf = pixels.shape[1]
     nv = pixels.shape[0]
     pixels = rearrange(pixels, "v f c h w -> (v f) c h w")
@@ -159,7 +159,10 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60):
     latents = torch.cat(latents)
 
     # Shape of latents: ((v 15) 4 33 33) -> (v 65340)
-    latents = rearrange(latents, "(v f) c h w -> v (f c h w)", v=nv, f=nf)
+    if return_flattened:
+        latents = rearrange(latents, "(v f) c h w -> v (f c h w)", v=nv, f=nf)
+    else:
+        latents = rearrange(latents, "(v f) c h w -> v f c h w", v=nv, f=nf)
 
     return latents
 

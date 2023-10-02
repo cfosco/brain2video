@@ -21,19 +21,19 @@ def main():
     parser.add_argument('--z_path', 
                         type=str, 
                         help='Path to predicted latents npy file', 
-                        default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_rois:WB_sub01_z_zeroscope'
+                        default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_impulse_rois:BMDgeneral_avgtrainreps:False_sub01_z_zeroscope'
                         )
 
     parser.add_argument('--blip_path',
                         type=str,
                         help='Path to predicted conditioning vectors npy file',
-                        default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_rois:WB_sub01_blip'
+                        default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_impulse_rois:BMDgeneral_sub01_blip'
                         )
 
     parser.add_argument('--output_path',
                         type=str,
                         help='Output path for reconstructed videos',
-                        default='./reconstructions/WB_to_captions'
+                        default='./reconstructions/BMDgeneral_sub01_blip_avgrepsFalse_lf3'
                         )       
     
     parser.add_argument('--set',
@@ -53,9 +53,15 @@ def main():
                         )
 
     parser.add_argument('--use_gt_blip',
-                    action='store_true',
-                    help='Whether to use ground truth blip vectors',
-                    )
+                        action='store_true',
+                        help='Whether to use ground truth blip vectors',
+                        )
+    
+    parser.add_argument('--latent_factor',
+                        type=float,
+                        help='Factor to scale the predicted latents by',
+                        default=3.0
+                        )
 
     args = parser.parse_args()
 
@@ -130,10 +136,10 @@ def main():
         caption = embeds_to_captions(model_decoder, 
                                      device='cuda', 
                                      image_embeds=blip_embeds[i].unsqueeze(0), 
-                                     num_beams=1, 
+                                     num_beams=3, 
                                      max_length=20, 
                                      min_length=5, 
-                                     repetition_penalty=2.5)
+                                     repetition_penalty=3.5)
 
         print("Generated caption for video", idx_start+i, ":", caption)
 
@@ -149,9 +155,9 @@ def main():
         print("Reconstructing video", idx_start+i)
         rec_vid_frames =  pipe(
                             prompt = caption, 
-                            video = z[i], 
+                            video = z[i]*args.latent_factor, 
                             num_inference_steps=50,
-                            strength = 0.8, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+                            strength = 0.9, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
                         ).frames
         
         print("rec_vid_frames len", len(rec_vid_frames), "rec_vid_frames[0] shape", rec_vid_frames[0].shape)
@@ -170,8 +176,6 @@ def embeds_to_captions(model, device, image_embeds, sample=False, num_beams=3,
     if not sample:
         image_embeds = image_embeds.repeat_interleave(num_beams,dim=0)
 
-    print("JERE")
-
     image_atts = torch.ones(image_embeds.size()[:-1],dtype=torch.long).to(device)
     model_kwargs = {"encoder_hidden_states": image_embeds, "encoder_attention_mask":image_atts}
 
@@ -180,8 +184,8 @@ def embeds_to_captions(model, device, image_embeds, sample=False, num_beams=3,
     input_ids[:,0] = model.tokenizer.bos_token_id
     input_ids = input_ids[:, :-1] 
 
-    print("input_ids.shape", input_ids.shape)
-    print("prompt", prompt)
+    # print("input_ids.shape", input_ids.shape)
+    # print("prompt", prompt)
 
     
 
@@ -195,7 +199,7 @@ def embeds_to_captions(model, device, image_embeds, sample=False, num_beams=3,
                                               num_return_sequences=1,
                                               eos_token_id=model.tokenizer.sep_token_id,
                                               pad_token_id=model.tokenizer.pad_token_id, 
-                                              repetition_penalty=1.1,                                            
+                                              repetition_penalty=repetition_penalty,                                            
                                               **model_kwargs)
     else:
         #beam search
