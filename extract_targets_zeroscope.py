@@ -10,50 +10,13 @@ from PIL import Image
 import numpy as np
 import json
 from tqdm import trange, tqdm
-from utils import load_frames_to_tensor, print_current_gpu_memory, save_vectors_npy
+from utils import save_vectors_npy
 
-def main():
-    # Parse arguments
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--extract_for_idx",
-        required=False,
-        default=None,
-        nargs="*",
-        type=int,
-        help="Start and end idx of the videos for which to extract target vectors",
-    )
-
-    parser.add_argument(
-        "--path_to_video_frames",
-        required=False,
-        type=str,
-        default='./data/stimuli/frames',
-        help="Path to the videos for which to extract target vectors",
-    )
-
-    parser.add_argument(
-        "--path_to_annots",
-        required=False,
-        type=str,
-        default='./data/annotations.json',
-        help="Path to the BOLDMoments annotations file",
-    )
-
-    parser.add_argument(
-        "--output_path",
-        required=False,
-        type=str,
-        default='./data/target_vectors',
-        help="Path to store the target vectors. Vectors will be stored in subfolders z_zeroscope and c_zeroscope",
-    )
-
-    args = parser.parse_args()
+def main(args):
 
     ## Load stuff needed for zeroscope
     pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w", torch_dtype=torch.float16)
-    pipe.to("cuda:0")
+    pipe.to(args.gpu)
 
     ## Load videos as tensors with shape (b f c h w)
     # We assume that we load BOLDMoments data, which has 45 frames per video and width and height of 268
@@ -63,14 +26,14 @@ def main():
     get_and_save_z_targets(pipe, 
                            args.path_to_video_frames, 
                            batch_size=8, 
-                           output_path=os.path.join(args.output_path, 'z_zeroscope'))
+                           output_path=os.path.join(args.output_path, 'z_zeroscope_unflattened'))
 
     print("Getting c targets")
     ## Get c 
     get_and_save_c_targets(pipe, 
                            args.path_to_annots, 
                            batch_size=None, 
-                           output_path=os.path.join(args.output_path, 'c_zeroscope'))
+                           output_path=os.path.join(args.output_path, 'c_zeroscope_unflattened'))
 
     print(f"Saved target vectors to {args.output_path}")
 
@@ -116,12 +79,18 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
         # Get latent embedding targets
         batch_of_zs = videos_to_latent_vectors(videos, pipe, return_flattened=False)
 
+        print("batch_of_zs.shape", batch_of_zs.shape)
+        input()
         # Save targets
         video_names = video_folders[b*batch_size:(b+1)*batch_size]
         save_vectors_npy(batch_of_zs, output_path, video_names)
 
 
-def get_and_save_c_targets(pipe, path_to_annots='./data/annotations.json', batch_size=None, output_path='./data/target_vectors/c_zeroscope'):
+def get_and_save_c_targets(pipe, 
+                           path_to_annots='./data/annotations.json', 
+                           batch_size=None, 
+                           output_path='./data/target_vectors/c_zeroscope',
+                           average_captions=True):
 
     # Load annotations (default: BOLDMoments)
     annots = json.load(open(path_to_annots, 'r')) # captions located in annots.values()[0]['text_descriptions']
@@ -130,10 +99,29 @@ def get_and_save_c_targets(pipe, path_to_annots='./data/annotations.json', batch
     for video_name, a in tqdm(annots.items(), desc="Extracting conditioning vectors...", unit="video"):
         conditioning_vectors = prompts_to_conditioning_vectors(a['text_descriptions'], pipe)
         # average conditioning vectors
-        c = torch.mean(conditioning_vectors, dim=0, keepdim=True)
+        if average_captions:
+            c = torch.mean(conditioning_vectors, dim=0, keepdim=True)
+        else: # Choose first caption
+            c = conditioning_vectors[0].unsqueeze(0) 
 
         # save individual npy file
         save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
+
+
+def images_to_latent_vectors():
+    pass
+
+def load_nsd_image():
+    img = nsda.read_images(s-imgidx[0])
+    if plot:
+        from matplotlib import pyplot as plt
+        plt.imshow(img)
+        plt.title(p['caption'])
+        plt.show()
+    init_image = load_img_from_arr(img,resolution).to(device)
+    init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+
+    return init_image
 
 
 def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattened=True):
@@ -163,10 +151,11 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattene
         latents = rearrange(latents, "(v f) c h w -> v (f c h w)", v=nv, f=nf)
     else:
         latents = rearrange(latents, "(v f) c h w -> v f c h w", v=nv, f=nf)
-
+    
+    print("latents.shape", latents.shape)
     return latents
 
-def prompts_to_conditioning_vectors(prompts, pipe):
+def prompts_to_conditioning_vectors(prompts, pipe, return_flattened=False):
     with torch.no_grad():
         cond_vectors = pipe._encode_prompt(
                 prompts,
@@ -174,8 +163,56 @@ def prompts_to_conditioning_vectors(prompts, pipe):
                 num_images_per_prompt=1,
                 do_classifier_free_guidance=False,
             )
-    cond_vectors = rearrange(cond_vectors, "b k l -> b (k l)")
+    if return_flattened:
+        return rearrange(cond_vectors, "b k l -> b (k l)")
     return cond_vectors
 
 if __name__ == "__main__":
-    main()
+
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--extract_for_idx",
+        required=False,
+        default=None,
+        nargs="*",
+        type=int,
+        help="Start and end idx of the videos for which to extract target vectors",
+    )
+
+    parser.add_argument(
+        "--path_to_video_frames",
+        required=False,
+        type=str,
+        default='./data/stimuli/frames',
+        help="Path to the videos for which to extract target vectors",
+    )
+
+    parser.add_argument(
+        "--path_to_annots",
+        required=False,
+        type=str,
+        default='./data/annotations.json',
+        help="Path to the BOLDMoments annotations file",
+    )
+
+    parser.add_argument(
+        "--output_path",
+        required=False,
+        type=str,
+        default='./data/target_vectors',
+        help="Path to store the target vectors. Vectors will be stored in subfolders z_zeroscope and c_zeroscope",
+    )
+
+    parser.add_argument(
+        "--gpu",
+        required=False,
+        type=str,
+        default='cuda:0',
+        help="GPU to use for extracting target vectors",
+    )
+
+    args = parser.parse_args()
+
+    main(args)

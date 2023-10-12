@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--z_path', 
                         type=str, 
                         help='Path to predicted latents npy file', 
-                        default='./estimated_vectors/regressor:mlpwithscheduler_fmritype:betas_impulse_rois:BMDgeneral_avgtrainreps:False_sub01_z_zeroscope'
+                        default='./estimated_vectors/regressor:himalaya-ridgewithscheduler_fmritype:betas_impulse_rois:BMDgeneral_avgtrainreps:False_sub01_z_zeroscope'
                         )
 
     parser.add_argument('--blip_path',
@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--output_path',
                         type=str,
                         help='Output path for reconstructed videos',
-                        default='./reconstructions/BMDgeneral_sub01_blip_avgrepsFalse_lf3'
+                        default='./reconstructions/BMDgeneral_sub01_blip_gt'
                         )       
     
     parser.add_argument('--set',
@@ -136,10 +136,10 @@ def main():
         caption = embeds_to_captions(model_decoder, 
                                      device='cuda', 
                                      image_embeds=blip_embeds[i].unsqueeze(0), 
-                                     num_beams=3, 
+                                     num_beams=4, 
                                      max_length=20, 
-                                     min_length=5, 
-                                     repetition_penalty=3.5)
+                                     min_length=4, 
+                                     repetition_penalty=5.0)
 
         print("Generated caption for video", idx_start+i, ":", caption)
 
@@ -157,7 +157,7 @@ def main():
                             prompt = caption, 
                             video = z[i]*args.latent_factor, 
                             num_inference_steps=50,
-                            strength = 0.9, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+                            strength = 0.8, # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
                         ).frames
         
         print("rec_vid_frames len", len(rec_vid_frames), "rec_vid_frames[0] shape", rec_vid_frames[0].shape)

@@ -291,7 +291,7 @@ def save_vectors_npy(vectors, save_path, video_names):
 
     if type(vectors) == torch.Tensor:
         ran = range(vectors.shape[0])
-    elif type(vectors) == list:
+    else:
         ran = range(len(vectors))
 
     # Save each target vector for each video as its own npy file

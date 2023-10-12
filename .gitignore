@@ -1,9 +1,11 @@
 # large brain data
-data/responses
-data/stimuli
-data/betas
-data/betas_impulse
-data/target_vectors
+data/stimuli/*
+data/betas/*
+data/betas_nsd/*
+data/betas_raw/*
+data/betas_impulse/*
+data/target_vectors/*
+data/target_vectors_nsd/*
 data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
 data/tsne_results

@@ -13,39 +13,8 @@ from PIL import Image
 import numpy as np
 from torchvision import transforms
 
-def main():
+def main(args):
 
-    # Parse arguments
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--extract_for_idx",
-        required=False,
-        default=None,
-        nargs="*",
-        type=int,
-        help="Start and end idx of the videos for which to extract target vectors",
-    )
-
-    parser.add_argument(
-        "--output_path",
-        required=False,
-        type=str,
-        default='./data/target_vectors',
-        help="Path to store the target vectors. Vectors will be stored in subfolder blip",
-    )
-
-    parser.add_argument(
-        "--path_to_video_frames",
-        required=False,
-        type=str,
-        default='./data/stimuli/frames',
-        help="Path to the videos for which to extract target vectors",
-    )
-
-    args = parser.parse_args()
-
-    
     # Load BLIP model
     image_size = 240
     model_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth"
@@ -70,21 +39,21 @@ def main():
                                 args.path_to_video_frames, 
                                 batch_size=8, 
                                 size=image_size,
-                                output_path=os.path.join(args.output_path, 'blip'))
+                                output_path=os.path.join(args.output_path, 'blip_unflattened'))
 
 
 
 def get_and_save_BLIP_targets(model, 
                               path_to_video_frames, 
                               batch_size=None, 
-                              size=240,
-                              output_path='./data/target_vectors/blip'):
+                              size=264,
+                              output_path='./data/target_vectors/blip',
+                              flatten=False):
 
     n_frames_to_load = 15
     max_frame_number = 45
     skip_frames = max_frame_number // n_frames_to_load
     print(f"Loading {n_frames_to_load} frames per video")
-    size = 240
     n_videos = len(os.listdir(path_to_video_frames))
     video_folders = sorted(os.listdir(path_to_video_frames))
     
@@ -125,7 +94,9 @@ def get_and_save_BLIP_targets(model,
             blip_emb = np.mean(blip_emb, axis=0)
 
             # Shape of blip_emb: ((226, 768) -> (173568))
-            blip_emb = blip_emb.reshape(-1)
+            
+            if flatten:
+                blip_emb = blip_emb.reshape(-1)
             batch_of_blip_embs.append(blip_emb)
 
            
@@ -136,6 +107,38 @@ def get_and_save_BLIP_targets(model,
 
 
 if __name__ == "__main__":
-    main()
+
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--extract_for_idx",
+        required=False,
+        default=None,
+        nargs="*",
+        type=int,
+        help="Start and end idx of the videos for which to extract target vectors",
+    )
+
+    parser.add_argument(
+        "--output_path",
+        required=False,
+        type=str,
+        default='./data/target_vectors',
+        help="Path to store the target vectors. Vectors will be stored in subfolder blip",
+    )
+
+    parser.add_argument(
+        "--path_to_video_frames",
+        required=False,
+        type=str,
+        default='./data/stimuli/frames',
+        help="Path to the videos for which to extract target vectors",
+    )
+
+    args = parser.parse_args()
+
+    
+    main(args)
 
 
