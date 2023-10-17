@@ -40,7 +40,7 @@ def download_videos(
     target_path='./data',
     csail_username='cfosco',
 ):
-    path_to_videos = ('/data/vision/oliva/datasets/BOLDMoments/prepared_data/metadata',)
+    path_to_videos = '/data/vision/oliva/datasets/BOLDMoments/prepared_data/metadata'
 
     print("Downloading videos")
 
