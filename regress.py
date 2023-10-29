@@ -165,7 +165,7 @@ def main(args):
     target = config.target
     fmri_type = config.fmritype
     roi = config.roi
-    subject = config.subject
+    subject = config.subject[0]
     regressor = config.regressor
     backend = set_backend("numpy")  # or "torch_cuda"
 
@@ -467,7 +467,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--subject",
         type=str,
-        default='sub01',
+        default=['sub01'],
+        nargs="*",
         help="Subject for which fMRI data will be used. One of sub01, sub02,... , sub10",
     )
 
