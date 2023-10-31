@@ -1,16 +1,16 @@
 # Script to extract depth from the BOLDMoments videos
 
+import argparse
 import os
-import numpy as np
+
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 import timm
 import torch
-import matplotlib.pyplot as plt
-import argparse
 
 
-def load_midas(model_type = "DPT_Hybrid"):
-
+def load_midas(model_type="DPT_Hybrid"):
     # Load the midas depth estimator
     midas = torch.hub.load('intel-isl/MiDaS', model_type)
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -25,11 +25,10 @@ def load_midas(model_type = "DPT_Hybrid"):
     else:
         transform = midas_transforms.small_transform
 
-
     return midas, transform, device
 
-def extract_depth_over_video_fbf(video_path, save_path):
 
+def extract_depth_over_video_fbf(video_path, save_path):
     # Load the midas depth estimator
     midas, transform, device = load_midas()
 
@@ -61,7 +60,11 @@ def extract_depth_over_video_fbf(video_path, save_path):
 
         # Convert the prediction to an image and save it
         prediction = prediction.squeeze().cpu().numpy()
-        prediction = (255 * (prediction - prediction.min()) / (prediction.max() - prediction.min())).astype(np.uint8)
+        prediction = (
+            255
+            * (prediction - prediction.min())
+            / (prediction.max() - prediction.min())
+        ).astype(np.uint8)
 
         # Save as png
         os.makedirs(os.path.join(save_path), exist_ok=True)
@@ -75,10 +78,8 @@ def extract_depth_over_video_fbf(video_path, save_path):
 
 
 def extract_depth_over_frames(frames_path, save_path, midas, transform, device):
-
     # Loop over frames
     for frame_name in os.listdir(frames_path):
-
         # Load frame
         frame = cv2.imread(os.path.join(frames_path, frame_name))
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -92,18 +93,32 @@ def extract_depth_over_frames(frames_path, save_path, midas, transform, device):
 
         # Convert the prediction to an image and save it
         prediction = prediction.squeeze().cpu().numpy()
-        prediction = (255 * (prediction - prediction.min()) / (prediction.max() - prediction.min())).astype(np.uint8)
+        prediction = (
+            255
+            * (prediction - prediction.min())
+            / (prediction.max() - prediction.min())
+        ).astype(np.uint8)
         cv2.imwrite(os.path.join(save_path, frame_name), prediction)
 
 
-
 if __name__ == "__main__":
-    
     # parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_folder_path", type=str, default=None, help="path to folder of videos")
-    parser.add_argument("--frames_folder_path", type=str, default=None, help="path to folder of frame subfolders")
-    parser.add_argument("--save_path", type=str, default=None, help="path to save depth as subfolders of images")
+    parser.add_argument(
+        "--video_folder_path", type=str, default=None, help="path to folder of videos"
+    )
+    parser.add_argument(
+        "--frames_folder_path",
+        type=str,
+        default=None,
+        help="path to folder of frame subfolders",
+    )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default=None,
+        help="path to save depth as subfolders of images",
+    )
 
     args = parser.parse_args()
     video_folder_path = args.video_folder_path
@@ -112,7 +127,7 @@ if __name__ == "__main__":
 
     if video_folder_path is None and frames_folder_path is None:
         raise ValueError("Must provide either video_folder_path or frames_folder_path")
-    
+
     if save_path is None:
         save_path = os.path.join(os.getcwd(), "depth")
 
@@ -120,7 +135,6 @@ if __name__ == "__main__":
         folder = video_folder_path
     else:
         folder = frames_folder_path
-
 
     midas, transform, device = load_midas()
 
@@ -131,7 +145,5 @@ if __name__ == "__main__":
         s_p = os.path.join(save_path, v)
         os.makedirs(s_p, exist_ok=True)
         extract_depth_over_frames(f_p, s_p, midas, transform, device)
-    
-    print("Done!")
 
-    
+    print("Done!")
