@@ -13,6 +13,7 @@ from tqdm import tqdm
 import yaml
 import wandb
 
+
 class HimalayaRidgeRegressor:
     def __init__(self, alphas):
         self.alphas = alphas
@@ -30,25 +31,28 @@ class HimalayaRidgeRegressor:
         self.regressor.fit(X, y)
 
     def predict(self, X):
-
         if self.mean is None or self.std is None:
             raise ValueError("Regressor not trained")
-        
+
         # Standardize features
         X = (X - self.mean) / self.std
 
         return self.regressor.predict(X)
 
+
 class MLPRegressor(nn.Module):
     """Simple MLP regressor with 1 hidden layer"""
-    
+
     def __init__(self, input_shape, output_shape, hidden_size=1000):
         super().__init__()
         print("Initializing MLPRegressor with: ")
         print(f"Input shape: {input_shape}")
         print(f"Output shape: {output_shape}")
         print(f"Hidden size: {hidden_size}")
-        self.fc1 = nn.Linear(input_shape, hidden_size, )
+        self.fc1 = nn.Linear(
+            input_shape,
+            hidden_size,
+        )
         self.norm = nn.BatchNorm1d(hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_shape)
         self.act = nn.GELU()
@@ -57,14 +61,25 @@ class MLPRegressor(nn.Module):
         print(f"Number of parameters: {sum(p.numel() for p in self.parameters())}")
 
     def forward(self, x):
-
         x = self.fc1(x)
         x = self.act(x)
         x = self.norm(x)
         x = self.fc2(x)
         return x
 
-    def fit(self, X, y, X_test=None, y_test=None, batch_size=50, opt='adam', epochs=300, lr=0.001, verbose=True, use_tqdm=False):
+    def fit(
+        self,
+        X,
+        y,
+        X_test=None,
+        y_test=None,
+        batch_size=50,
+        opt='adam',
+        epochs=300,
+        lr=0.001,
+        verbose=True,
+        use_tqdm=False,
+    ):
         """Training function with a set Adam optimizer"""
         self.train()
         if opt == 'adam':
@@ -83,7 +98,9 @@ class MLPRegressor(nn.Module):
         if y_test is not None and not isinstance(y_test, torch.Tensor):
             y_test = torch.tensor(y_test).float().to('cuda')
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=verbose)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.1, patience=10, verbose=verbose
+        )
 
         for epoch in range(epochs):
             if use_tqdm:
@@ -92,8 +109,8 @@ class MLPRegressor(nn.Module):
                 pbar = range(0, len(X), batch_size)
             for i in pbar:
                 optimizer.zero_grad()
-                batch_X = X[i:i+batch_size]
-                batch_y = y[i:i+batch_size]
+                batch_X = X[i : i + batch_size]
+                batch_y = y[i : i + batch_size]
 
                 # send batch to GPU
                 batch_X = torch.tensor(batch_X).float().to('cuda')
@@ -119,18 +136,14 @@ class MLPRegressor(nn.Module):
                         print(f'Epoch {epoch} Validation Loss {loss.item()}')
                     self.train()
 
-                    
             scheduler.step(loss)
-
-
-
 
     def predict(self, X, batch_size=100):
         """Predict function"""
         with torch.no_grad():
             self.eval()
             for i in range(0, len(X), batch_size):
-                batch_X = X[i:i+batch_size]
+                batch_X = X[i : i + batch_size]
                 batch_X = torch.tensor(batch_X).float().to('cuda')
                 preds = self(batch_X)
                 if i == 0:
@@ -144,11 +157,7 @@ class AutoGluonRegressor:
     pass
 
 
-
-
-
 def main(args):
-
     # Load yaml config
     # with open(args.config, 'r') as f:
     #     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -158,9 +167,8 @@ def main(args):
 
     # Weights and biases setup
     # wandb.login()
-    # wandb.init(project="brain2video", 
+    # wandb.init(project="brain2video",
     #             config=config)
-
 
     target = config.target
     fmri_type = config.fmritype
@@ -182,31 +190,31 @@ def main(args):
     method = f'regressor:{regressor}withscheduler_fmritype:{fmri_type}_rois:{"-".join(roi)}_avgtrainreps:{config.avg_train_reps}_usensd:{config.use_nsd}'
     print("Method:", method)
 
-
     # If pretrain NSD, load NSD data
     if args.use_nsd:
-        fmri_feat_train_nsd = load_nsd_betas_impulse(f'data/betas_nsd/{subject}', 
-                                                     roi=roi, 
-                                                     avg_train_reps=config.avg_train_reps)
-        target_train_nsd = load_target_vectors_nsd(f'data/target_vectors_nsd/{target}', 
-                                                   subject=subject, # NSD has different targets per subject, as not all subjects saw all stimuli
-                                                   repeat_train=repeat_train)
-        
+        fmri_feat_train_nsd = load_nsd_betas_impulse(
+            f'data/betas_nsd/{subject}', roi=roi, avg_train_reps=config.avg_train_reps
+        )
+        target_train_nsd = load_target_vectors_nsd(
+            f'data/target_vectors_nsd/{target}',
+            subject=subject,  # NSD has different targets per subject, as not all subjects saw all stimuli
+            repeat_train=repeat_train,
+        )
 
     ## Load train and test input features
     if fmri_type == 'betas_impulse':
-        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_impulse(fmri_path, 
-                                                                         roi=roi, 
-                                                                         avg_train_reps=config.avg_train_reps)
+        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_impulse(
+            fmri_path, roi=roi, avg_train_reps=config.avg_train_reps
+        )
     elif fmri_type == 'betas_raw':
-        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_raw(fmri_path, 
-                                                                     roi=roi,
-                                                                     avg_train_reps=config.avg_train_reps)
-    
+        fmri_feat_train, fmri_feat_test = load_boldmoments_betas_raw(
+            fmri_path, roi=roi, avg_train_reps=config.avg_train_reps
+        )
 
     ## Load train and test output targets
-    target_train, target_test = load_target_vectors_boldmoments(targets_path, repeat_train=repeat_train)
-    
+    target_train, target_test = load_target_vectors_boldmoments(
+        targets_path, repeat_train=repeat_train
+    )
 
     # Concatenate NSD data
     if args.use_nsd:
@@ -222,15 +230,13 @@ def main(args):
         print(f"fmri_feat_train: {fmri_feat_train.shape}")
         print(f"target_train: {target_train.shape}")
 
-
     ## Define regressor
     if regressor == 'himalaya-ridge':
-
         # Define Ridge Regression Parameters
         if target in ['z_zeroscope', 'c_zeroscope']:
             # alphas = [0.000001,0.00001,0.0001,0.001,0.01, 0.1, 1]
             alphas = [0.1, 1, 10]
-        else: # for larger number of outputs
+        else:  # for larger number of outputs
             alphas = [10000, 20000, 40000]
 
         ridge = RidgeCV(alphas=alphas)
@@ -255,7 +261,6 @@ def main(args):
     else:
         raise NotImplementedError(f"Regressor {regressor} not implemented")
 
-
     ## Fit model
     print(f'Training Regressor for {subject}. Input ROIs: {roi}. Target: {target}')
     print(f'Input features train shape: {fmri_feat_train.shape}')
@@ -265,10 +270,17 @@ def main(args):
     if regressor == 'himalaya-ridge':
         pipeline.fit(fmri_feat_train, target_train)
     else:
-        pipeline.fit(fmri_feat_train, target_train, X_test=fmri_feat_test, y_test=target_test)
+        pipeline.fit(
+            fmri_feat_train, target_train, X_test=fmri_feat_test, y_test=target_test
+        )
     preds_train = pipeline.predict(fmri_feat_train)
     preds_test = pipeline.predict(fmri_feat_test)
-    
+
+    preds_train = to_numpy(preds_train)
+    preds_test = to_numpy(preds_test)
+    target_train = to_numpy(target_train)
+    target_test = to_numpy(target_test)
+
     ## Save predictions
     save_path = f'estimated_vectors/{method}_{subject}_{target}'
     os.makedirs(save_path, exist_ok=True)
@@ -278,6 +290,7 @@ def main(args):
     ## Compute test metrics
     print("Train metrics:")
     train_metrics = compute_metrics(target_train, preds_train, verbose=True)
+    print(train_metrics)
 
     print("Test metrics:")
     test_metrics = compute_metrics(target_test, preds_test, verbose=True)
@@ -286,34 +299,59 @@ def main(args):
     with open(f'{save_path}/test_metrics:{test_metrics}.pkl', 'wb') as f:
         pkl.dump(test_metrics, f)
 
+
+def to_numpy(arr):
+    try:
+        return maybe_move_to_host(arr).numpy()
+    except AttributeError:
+        pass
+    return arr
+
+
+def maybe_move_to_host(arr):
+    """Moves array to host if it's on GPU"""
+    try:
+        return arr.detach().cpu()
+    except AttributeError:
+        pass
+    return arr
+
+
 def predict_and_average(pipeline, X_with_reps, n_reps=10):
     '''Makes predictions with different reps as input and averages the results'''
-    
+
     from einops import rearrange
 
     preds = pipeline.predict(X_with_reps)
-    
+
     preds = rearrange(preds, '(b r) n -> b r n', r=n_reps)
     preds = np.mean(preds, axis=1)
 
     return preds
 
 
-
-def load_nsd_betas_impulse(path_to_subject_data: str, roi: list, avg_train_reps=True) -> None:
-    
+def load_nsd_betas_impulse(
+    path_to_subject_data: str, roi: list, avg_train_reps=True
+) -> None:
     betas_impulse_train_list = []
 
     for r in roi:
         pkl_name = f'{r}_betas-GLMsingle_type-typeb_z=1.pkl'
-        with open(os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb') as f:
+        with open(
+            os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb'
+        ) as f:
             data = pkl.load(f)
-        
+
         if avg_train_reps:
-            betas_impulse_train_list.append( np.mean(data['data_allvoxel'], axis=1))
+            betas_impulse_train_list.append(np.mean(data['data_allvoxel'], axis=1))
         else:
             # Concatenate all repetitions into dim 0
-            data_train = np.concatenate([data['data_allvoxel'][:,i,:] for i in range(data['data_allvoxel'].shape[1])])
+            data_train = np.concatenate(
+                [
+                    data['data_allvoxel'][:, i, :]
+                    for i in range(data['data_allvoxel'].shape[1])
+                ]
+            )
             betas_impulse_train_list.append(data_train)
 
         # TODO: add noise ceiling
@@ -322,42 +360,50 @@ def load_nsd_betas_impulse(path_to_subject_data: str, roi: list, avg_train_reps=
 
     return betas_impulse_train_npy
 
-def load_boldmoments_betas_impulse(path_to_subject_data: str, 
-                                   roi: list, 
-                                   avg_train_reps=True,
-                                   concat_noise_ceiling=True) -> None:
-    
+
+def load_boldmoments_betas_impulse(
+    path_to_subject_data: str, roi: list, avg_train_reps=True, concat_noise_ceiling=True
+) -> None:
     betas_impulse_train_list = []
     betas_impulse_test_list = []
 
     for r in roi:
         pkl_name = f'{r}_betas-GLMsingle_type-typed_z=1.pkl'
-        with open(os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb') as f:
+        with open(
+            os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb'
+        ) as f:
             data = pkl.load(f)
-        
+
         if avg_train_reps:
-            betas_impulse_train_list.append( np.mean(data['train_data_allvoxel'], axis=1))
+            betas_impulse_train_list.append(
+                np.mean(data['train_data_allvoxel'], axis=1)
+            )
         else:
             # Concatenate all repetitions into dim 0
-            data_train = np.concatenate([data['train_data_allvoxel'][:,i,:] for i in range(data['train_data_allvoxel'].shape[1])])
+            data_train = np.concatenate(
+                [
+                    data['train_data_allvoxel'][:, i, :]
+                    for i in range(data['train_data_allvoxel'].shape[1])
+                ]
+            )
             betas_impulse_train_list.append(data_train)
 
-
-        betas_impulse_test_list.append( np.mean(data['test_data_allvoxel'], axis=1))
+        betas_impulse_test_list.append(np.mean(data['test_data_allvoxel'], axis=1))
 
         # TODO: add noise ceiling
 
     betas_impulse_train_npy = np.concatenate(betas_impulse_train_list, axis=1)
     betas_impulse_test_npy = np.concatenate(betas_impulse_test_list, axis=1)
 
-
     return betas_impulse_train_npy, betas_impulse_test_npy
 
 
-def load_boldmoments_betas_raw(path_to_subject_data: str, roi: list, avg_train_reps=True) -> None:
+def load_boldmoments_betas_raw(
+    path_to_subject_data: str, roi: list, avg_train_reps=True
+) -> None:
     """
-    load fMRI data into list that can be used for regression. 
-    List should contain N elements, corresponding to the N videos in the selected subset. 
+    load fMRI data into list that can be used for regression.
+    List should contain N elements, corresponding to the N videos in the selected subset.
     Each element is an array of betas, concatenating betas for all rois in the roi list.
     """
 
@@ -370,17 +416,19 @@ def load_boldmoments_betas_raw(path_to_subject_data: str, roi: list, avg_train_r
 
         # Average over repetitions
         if avg_train_reps:
-            fmri_features_train_list.append( np.mean(data['train_data'], axis=1))
+            fmri_features_train_list.append(np.mean(data['train_data'], axis=1))
         else:
-            fmri_features_train_list.append( data['train_data'])
+            fmri_features_train_list.append(data['train_data'])
 
-    fmri_features_train_npy = np.concatenate(fmri_features_train_list, axis=1) 
+    fmri_features_train_npy = np.concatenate(fmri_features_train_list, axis=1)
     fmri_features_test_npy = np.concatenate(fmri_features_test_list, axis=1)
 
     return fmri_features_train_npy, fmri_features_test_npy
 
 
-def load_target_vectors_nsd(path_to_target_vectors: str, subject: str, repeat_train=1) -> None:
+def load_target_vectors_nsd(
+    path_to_target_vectors: str, subject: str, repeat_train=1
+) -> None:
     """
     Load target vectors for a given subject
     """
@@ -395,16 +443,21 @@ def load_target_vectors_nsd(path_to_target_vectors: str, subject: str, repeat_tr
     for target in train_list:
         target_train.append(np.load(f'{path_to_target_vectors}/{target-1:06d}.npy'))
 
-    target_train = np.array(target_train*repeat_train)
+    target_train = np.array(target_train * repeat_train)
 
     # flatten vectors
     target_train = target_train.reshape(target_train.shape[0], -1)
 
-    print(f"Loaded {len(img_idxs[0])} NSD img_idxs for subject {subject}, starting with {img_idxs[0][0:5]}")
+    print(
+        f"Loaded {len(img_idxs[0])} NSD img_idxs for subject {subject}, starting with {img_idxs[0][0:5]}"
+    )
 
     return target_train
 
-def load_target_vectors_boldmoments(path_to_target_vectors: str, repeat_train=1) -> None:
+
+def load_target_vectors_boldmoments(
+    path_to_target_vectors: str, repeat_train=1
+) -> None:
     """
     Load target vectors for a given subject
     """
@@ -419,19 +472,17 @@ def load_target_vectors_boldmoments(path_to_target_vectors: str, repeat_train=1)
         else:
             target_test.append(np.load(f'{path_to_target_vectors}/{target}'))
 
-    target_train = np.array(target_train*repeat_train)
+    target_train = np.array(target_train * repeat_train)
     target_test = np.array(target_test)
 
     # flatten vectors
     target_train = target_train.reshape(target_train.shape[0], -1)
     target_test = target_test.reshape(target_test.shape[0], -1)
-    
+
     return target_train, target_test
 
 
-
 if __name__ == "__main__":
-
     # Argument handling
     parser = argparse.ArgumentParser()
 
@@ -488,11 +539,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_nsd",
         type=bool,
-        default=True,
+        default=False,
         help="Whether to use NSD data as well",
     )
 
-
-        
     args = parser.parse_args()
     main(args)
