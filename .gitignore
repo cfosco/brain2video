@@ -10,6 +10,9 @@ data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
 data/tsne_results
 
+# mbm
+mbm_encoder/pretrained_model/*
+
 # Other
 cache/
 prompt-to-prompt/

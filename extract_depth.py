@@ -145,5 +145,3 @@ if __name__ == "__main__":
         s_p = os.path.join(save_path, v)
         os.makedirs(s_p, exist_ok=True)
         extract_depth_over_frames(f_p, s_p, midas, transform, device)
-
-    print("Done!")
