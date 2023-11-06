@@ -188,7 +188,7 @@ def main(args):
         fmri_feat_train_nsd = load_nsd_betas_impulse(f'data/betas_nsd/{subject}', 
                                                      roi=roi, 
                                                      avg_train_reps=config.avg_train_reps)
-        target_train_nsd = load_target_vectors_nsd(f'data/target_vectors_nsd/{target}', 
+        target_train_nsd = load_target_vectors_nsd(f'data/target_vectors_nsd/{target}_unflattened', 
                                                    subject=subject, # NSD has different targets per subject, as not all subjects saw all stimuli
                                                    repeat_train=repeat_train)
         
@@ -380,7 +380,7 @@ def load_boldmoments_betas_raw(path_to_subject_data: str, roi: list, avg_train_r
     return fmri_features_train_npy, fmri_features_test_npy
 
 
-def load_target_vectors_nsd(path_to_target_vectors: str, subject: str, repeat_train=1) -> None:
+def load_target_vectors_nsd(path_to_target_vectors: str, subject: str, repeat_train=1, num_frames_to_simulate=15) -> None:
     """
     Load target vectors for a given subject
     """
@@ -393,12 +393,16 @@ def load_target_vectors_nsd(path_to_target_vectors: str, subject: str, repeat_tr
 
     train_list = img_idxs[0]
     for target in train_list:
-        target_train.append(np.load(f'{path_to_target_vectors}/{target-1:06d}.npy'))
+        vec = np.load(f'{path_to_target_vectors}/{target-1:06d}.npy')
+        # Repeat vector for each frame to simulate
+        target_train.append(np.repeat(vec[None], num_frames_to_simulate, axis=0))
 
     target_train = np.array(target_train*repeat_train)
+    print('target_train.shape', target_train.shape)
 
     # flatten vectors
     target_train = target_train.reshape(target_train.shape[0], -1)
+    print('target_train.shape after flatten', target_train.shape)
 
     print(f"Loaded {len(img_idxs[0])} NSD img_idxs for subject {subject}, starting with {img_idxs[0][0:5]}")
 
