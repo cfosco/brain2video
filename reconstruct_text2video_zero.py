@@ -2,17 +2,18 @@
 latent and conditioning vectors using Zeroscope"""
 
 
+import argparse
 import os
+
 import numpy as np
 import torch
-import argparse
 from diffusers import (
-    TextToVideoZeroPipeline,
-    VideoToVideoSDPipeline,
     DPMSolverMultistepScheduler,
+    TextToVideoZeroPipeline,
 )
 from einops import rearrange
-from utils import vid_to_gif, frames_to_vid
+
+from utils import frames_to_vid, vid_to_gif
 
 
 def main():
@@ -121,7 +122,7 @@ def main():
         # Reconstruct videos
         print("Reconstructing video", idx_start + i)
         rec_vid_frames = pipe(
-            video=z[i],
+            latents=z[i],
             prompt_embeds=c[i].unsqueeze(0),
             num_inference_steps=50,
             strength=0.3,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
