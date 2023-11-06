@@ -11,6 +11,8 @@ import numpy as np
 import json
 from tqdm import trange, tqdm
 from utils import save_vectors_npy
+from torch.utils.data import DataLoader
+from dataset import NSDImageDataset
 
 def main(args):
 
@@ -23,20 +25,57 @@ def main(args):
     
     print("Getting z targets")
     ## Get z
-    get_and_save_z_targets(pipe, 
-                           args.path_to_video_frames, 
-                           batch_size=8, 
+    # get_and_save_z_targets(pipe, 
+    #                        args.path_to_video_frames, 
+    #                        batch_size=8, 
+    #                        output_path=os.path.join(args.output_path, 'z_zeroscope_unflattened'))
+
+
+
+    get_and_save_z_targets_nsd(pipe, 
+                           args.nsd_path, 
+                           batch_size=80, 
+                           resolution=268,
                            output_path=os.path.join(args.output_path, 'z_zeroscope_unflattened'))
 
-    print("Getting c targets")
+    # print("Getting c targets")
     ## Get c 
-    get_and_save_c_targets(pipe, 
-                           args.path_to_annots, 
-                           batch_size=None, 
-                           output_path=os.path.join(args.output_path, 'c_zeroscope_unflattened'))
+    # get_and_save_c_targets(pipe, 
+    #                        args.path_to_annots, 
+    #                        batch_size=None, 
+    #                        output_path=os.path.join(args.output_path, 'c_zeroscope_unflattened'))
 
     print(f"Saved target vectors to {args.output_path}")
 
+
+def get_and_save_z_targets_nsd(pipe, 
+                               nsd_path = '../StableDiffusionReconstruction/nsd',
+                               idxs = list(range(0,73000)),
+                               batch_size=None,
+                               resolution=268,
+                               output_path='./data/target_vectors_nsd/z_zeroscope',):
+    
+    # Instantiate Dataset
+    dataset = NSDImageDataset(idxs = idxs, 
+                              nsd_path=nsd_path,
+                              resolution=resolution)
+
+    names = [f'{idx:06d}' for idx in idxs]
+
+    # Iterate over dataset and extract vectors
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+
+    for i, batch in enumerate(tqdm(dataloader, desc="Extracting and saving z vectors...", unit="batch")):
+
+        # Get latent embedding targets
+        batch_of_zs = images_to_latent_vectors(batch, pipe, return_flattened=False)
+
+        # print("batch_of_zs.shape", batch_of_zs.shape)
+
+        # Save targets
+        save_vectors_npy(batch_of_zs, output_path, names[i*batch_size:(i+1)*batch_size])
+    
+    
 
 def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_path='./data/target_vectors/z_zeroscope'):
 
@@ -57,6 +96,8 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
 
         # Build empty array to store videos
         videos = np.zeros((bs, n_frames_to_load, 3, size, size))
+
+        ## TODO: Encapsulate the entire following loop in a dataloader-dataset combo
 
         # Load videos frame by frame
         for v, frame_folder in enumerate(video_folders[b*batch_size:(b+1)*batch_size]):
@@ -79,8 +120,8 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
         # Get latent embedding targets
         batch_of_zs = videos_to_latent_vectors(videos, pipe, return_flattened=False)
 
-        print("batch_of_zs.shape", batch_of_zs.shape)
-        input()
+        # print("batch_of_zs.shape", batch_of_zs.shape)
+        # input()
         # Save targets
         video_names = video_folders[b*batch_size:(b+1)*batch_size]
         save_vectors_npy(batch_of_zs, output_path, video_names)
@@ -108,21 +149,23 @@ def get_and_save_c_targets(pipe,
         save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
 
 
-def images_to_latent_vectors():
-    pass
+def images_to_latent_vectors(pixels, pipe, return_flattened=False):
 
-def load_nsd_image():
-    img = nsda.read_images(s-imgidx[0])
-    if plot:
-        from matplotlib import pyplot as plt
-        plt.imshow(img)
-        plt.title(p['caption'])
-        plt.show()
-    init_image = load_img_from_arr(img,resolution).to(device)
-    init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+    pixels_batch = pixels.to(pipe.device, dtype=torch.half) # Expected to be of dim (b c h w)
+    latents = []
+    with torch.no_grad():
+        latents_batch = pipe.vae.encode(pixels_batch).latent_dist.sample()
+  
+    lb = latents_batch.mul(pipe.vae.config.scaling_factor).detach().cpu()
+    latents.append(lb)
+    latents = torch.cat(latents)
+    
+    # Shape of latents: ((v 15) 4 33 33) -> (v 65340)
+    if return_flattened:
+        latents = rearrange(latents, "b c h w -> b (c h w)")
 
-    return init_image
-
+    return latents
+    
 
 def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattened=True):
     nf = pixels.shape[1]
@@ -152,7 +195,7 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattene
     else:
         latents = rearrange(latents, "(v f) c h w -> v f c h w", v=nv, f=nf)
     
-    print("latents.shape", latents.shape)
+    # print("latents.shape", latents.shape)
     return latents
 
 def prompts_to_conditioning_vectors(prompts, pipe, return_flattened=False):
@@ -187,6 +230,14 @@ if __name__ == "__main__":
         type=str,
         default='./data/stimuli/frames',
         help="Path to the videos for which to extract target vectors",
+    )
+
+    parser.add_argument(
+        "--nsd_path",
+        required=False,
+        type=str,
+        default='../StableDiffusionReconstruction/nsd',
+        help="Path to the NSD dataset",
     )
 
     parser.add_argument(

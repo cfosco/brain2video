@@ -286,7 +286,7 @@ def preprocess_video_for_vid2vid_pipeline(video):
     return video
 
 
-def save_vectors_npy(vectors, save_path, video_names):
+def save_vectors_npy(vectors, save_path, filenames):
     os.makedirs(save_path, exist_ok=True)
 
     if type(vectors) == torch.Tensor:
@@ -296,7 +296,7 @@ def save_vectors_npy(vectors, save_path, video_names):
 
     # Save each target vector for each video as its own npy file
     for i in ran:
-        np.save(os.path.join(save_path, f"{video_names[i]}.npy"), vectors[i])
+        np.save(os.path.join(save_path, f"{filenames[i]}.npy"), vectors[i])
 
 
 def print_current_gpu_memory():
