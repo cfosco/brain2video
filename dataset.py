@@ -37,7 +37,7 @@ class NSDImageDataset(data.Dataset):
             with open(f'{betas_path}/{sub}/events_imgtag-73k_id.pkl', 'rb') as f:
                 d = pkl.load(f)
             self.idxs = [i-1 for i in d[0]] # Substracting 1 because the pkl is 1-indexed, but nsda.read_images expects 0-indexed inputs (goes from 0-72999)
-            print(min(self.idxs), max(self.idxs))
+            # print(min(self.idxs), max(self.idxs))
 
         else:
             self.idxs = idxs
@@ -47,7 +47,7 @@ class NSDImageDataset(data.Dataset):
         return len(self.idxs)
 
     def __getitem__(self, idx):
-        print("Getting image at NSD index:",self.idxs[idx])
+        # print("Getting image at NSD index:",self.idxs[idx])
 
         img = self.nsda.read_images(self.idxs[idx])
         
@@ -85,77 +85,149 @@ class NSDCaptionsDataset(data.Dataset):
         
 
 class NSDBetasAndTargetsDataset(data.Dataset):
-
+    """
+    NSD Dataset returning betas and targets.
+    """
     def __init__(self, 
-                 betas_path, 
-                 targets_path, 
+                 betas_path,
+                 targets_path,
                  avg_reps=False, 
                  rois=['BMDgeneral'],
                  subs=[1],
-                 subset='train'):
+                 subset='train',
+                 load_all_in_ram=False,
+                 return_filename=False,
+                 flatten_targets=True,
+                 num_frames_to_simulate=15):
+        """
+        Constructor for NSDBetasAndTargetsDataset.
 
-        self.betas = []
-        self.targets = []
+        Args:
+            betas_path (str): path to NSD betas. This path should point to a folder containing subject subfolders called sub01, sub02, etc.
+            targets_path (str): Path to target vectors. The folder this path points to should contain 73000 npy arrays corresponding to the target vectors for each NSD stimuli.
+            avg_reps (bool): whether to average over repetitions
+            rois (list): list of ROIs to include
+            subs (list): list of subjects to include
+            subset (str): 'train', 'test' or 'both'
+        """
+
+        if load_all_in_ram:
+            self.betas=[]
+            self.targets=[]
+        self.betas_filenames = []
+        self.targets_filenames = []
+
         self.betas_path = betas_path
         self.targets_path = targets_path
+        self.avg_reps = avg_reps
         self.rois = rois
         self.subs = subs
         self.subset = subset
+        self.load_all_in_ram = load_all_in_ram
+        self.return_filename = return_filename
+        self.flatten_targets = flatten_targets
+        self.num_frames_to_simulate = num_frames_to_simulate
 
-        if not avg_reps and subset == 'train':
-            repeat_targets = 3
-        elif not avg_reps and subset == 'test':
-            repeat_targets = 10
-        elif avg_reps:
-            repeat_targets = 1
+        if not avg_reps:
+            self.repeat_targets = 3
         else:
-            raise ValueError(f'Unknown subset')
-        
-
+            self.repeat_targets = 1  
+     
         for sub in subs:
-            path_to_subject_data = os.path.join(betas_path, f'sub{sub:02d}')
-
-            self.betas.extend(self.load_nsd_betas_impulse(path_to_subject_data, 
-                                                          rois, 
-                                                          avg_reps=avg_reps,
-                                                          subset=subset))
-
-            self.targets.extend(self.load_target_vectors_nsd(targets_path, 
-                                                             sub, 
-                                                             subset=subset,
-                                                             repeat_targets=repeat_targets))
+            if load_all_in_ram:
+                self.betas.extend(self.load_nsd_betas_impulse(sub))
+                self.targets.extend(self.load_target_vectors_nsd(sub))
+            else:
+                # Load pickle with ids of stimuli used for this subject
+                with open(os.path.join(betas_path,f'sub{sub:02d}/events_imgtag-73k_id.pkl'), 'rb') as f:
+                    self.stim_idxs = [i-1 for i in pkl.load(f)[0]] # Substract 1 because the pkl is 1-indexed, but nsda.read_images expects 0-indexed inputs (goes from 0-72999)
+                
+                self.betas_filenames.extend( 
+                    self.gather_betas_impulse_filenames(sub)
+                )
+                self.targets_filenames.extend( 
+                    self.gather_target_filenames()
+                )
 
     def __len__(self):
-        return len(self.betas)
+        return len(self.betas_filenames)
 
     def __getitem__(self, idx):
 
-        # Get betas
+        if self.load_all_in_ram:
+            ret = (self.betas[idx], self.targets[idx])
+        
+        else:
+            beta = self.load_beta(idx)
+            target = self.load_target(idx)
+            ret = (beta, target)
 
-        # Get target
-        target = load_target(self.targets_path, self.targets[idx])
+        if self.return_filename:
+            ret = ret + (self.betas_filenames[idx], self.targets_filenames[idx])
+        
+        return ret
 
-        return self.betas[idx], self.targets[idx]
+    def load_beta(self, idx):
+        betas = []
+        for roi in self.rois:
+            roi_folder = roi+'_betas-GLMsingle_type-typeb_z=1'
+            beta_filename = self.betas_filenames[idx].replace('ROI_FOLDER_PLACEHOLDER', roi_folder)
+            betas.append( np.load(os.path.join(self.betas_path, 
+                                               beta_filename))
+            )
+        return np.concatenate(betas)
 
+    def load_target(self, idx):
+        target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
+        target = np.repeat(target[None], self.num_frames_to_simulate, axis=0)
+        if self.flatten_targets:
+            return target.reshape(-1)
+        return target
+    
+    def gather_betas_impulse_filenames(self, sub: int) -> list:
+        
+        betas_filenames = []
+        
+        for i in self.stim_idxs:
+            if self.avg_reps:
+                betas_filenames.append(
+                    os.path.join(f'sub{sub:02d}', 'indiv_npys_avg', 'ROI_FOLDER_PLACEHOLDER', f'{i:06d}.npy')
+                )
+            else:
+                for rep in range(self.repeat_targets):
+                    betas_filenames.append(
+                        os.path.join(f'sub{sub:02d}', 'indiv_npys', 'ROI_FOLDER_PLACEHOLDER', f'{i:06d}_{rep}.npy')
+                    )
 
-    def load_target():
+        return betas_filenames
+    
 
-        # Load training pickle
-        with open(f'{self.betas_path}/sub{subject:02d}/events_imgtag-73k_id.pkl', 'rb') as f:
-            img_idxs = pkl.load(f)
+    def gather_target_filenames(self) -> list:
+        
+        targets_filenames = []
+
+        for i in self.stim_idxs:
+            for _ in range(self.repeat_targets):
+                targets_filenames.append(f'{i:06d}.npy')
+
+        return targets_filenames
+        
+                                      
 
     def load_nsd_betas_impulse(self,
-                               path_to_subject_data: str, 
+                               betas_path: str, 
+                               sub: int,
                                rois: list, 
                                avg_reps=True,
                                subset='train') -> None:
         
+        subj_betas_path = os.path.join(betas_path, f'sub{sub:02d}')
         betas_sub = []
 
         for roi in rois:
             pkl_name = f'{roi}_betas-GLMsingle_type-typeb_z=1.pkl'
 
-            with open(os.path.join(path_to_subject_data, 'prepared_allvoxel_pkl', pkl_name), 'rb') as f:
+            with open(os.path.join(subj_betas_path, 'prepared_allvoxel_pkl', pkl_name), 'rb') as f:
                 data = pkl.load(f)
 
             if avg_reps:
@@ -205,16 +277,6 @@ class BMDBetasAndTargetsDataset(data.Dataset):
     
     Can concatenate betas from multiple subjects and ROIs. 
     Returns either train, test or both depending on the subset parameter
-    
-    Args:
-        betas_path (str): path to BOLDMoments betas. 
-            This path should point to a folder containing subject subfolders called sub01, sub02, etc.
-        targets_path (str): path to target vectors. 
-        avg_train_reps (bool): whether to average over repetitions in training data
-        beta_type (str): 'impulse' or 'raw'
-        rois (list): list of ROIs to include
-        subs (list): list of subjects to include
-        subset (str): 'train', 'test' or 'both'
     '''
     
     def __init__(self, 
@@ -224,12 +286,50 @@ class BMDBetasAndTargetsDataset(data.Dataset):
                  beta_type='impulse',
                  rois=['BMDgeneral'],
                  subs=[1],
-                 subset='train'):
+                 subset='train',
+                 load_all_in_ram=False,
+                 use_noise_ceiling=True,
+                 return_filename=False,
+                 flatten_targets=True):
+        '''
+        Constructor for BMDBetasAndTargetsDataset.
+               
+    
+        Args:
+            betas_path (str): path to BOLDMoments betas. 
+                This path should point to a folder containing subject subfolders called sub01, sub02, etc.
+            targets_path (str): path to target vectors. 
+            avg_train_reps (bool): whether to average over repetitions in training data
+            beta_type (str): 'impulse' or 'raw'
+            rois (list): list of ROIs to include
+            subs (list): list of subjects to include
+            subset (str): 'train', 'test' or 'both'
+            load_all_in_ram (bool): whether to load all data in RAM. If False, data will be loaded on the fly
+            use_noise_ceiling (bool): whether to multiply features by noise ceiling
+        '''
         
         self.betas = []
         self.targets = []
+        self.betas_filenames = []
+        self.targets_filenames = []
+
+        self.betas_path = betas_path
+        self.targets_path = targets_path
+        self.avg_reps = avg_reps
+        self.beta_type = beta_type
         self.rois = rois
         self.subs = subs
+        self.subset = subset
+        self.load_all_in_ram = load_all_in_ram
+        self.use_noise_ceiling = use_noise_ceiling
+        self.return_filename = return_filename
+        self.flatten_targets = flatten_targets
+
+        # BMD's stimuli indexes are 1-1000 if train, 1001-1102 if test
+        if subset == 'train':
+            self.stim_idxs = list(range(1,1001)) 
+        elif subset == 'test':
+            self.stim_idxs = list(range(1001, 1103))
 
         if beta_type == 'impulse':
             load_betas = self.load_boldmoments_betas_impulse
@@ -239,41 +339,106 @@ class BMDBetasAndTargetsDataset(data.Dataset):
             raise ValueError(f'beta_type must be "impulse" or "raw", not {beta_type}')
 
         if not avg_reps and subset == 'train':
-            repeat_targets = 3
+            self.repeat_targets = 3
         elif not avg_reps and subset == 'test':
-            repeat_targets = 10
+            self.repeat_targets = 10
         elif avg_reps:
-            repeat_targets = 1
+            self.repeat_targets = 1
         else:
             raise ValueError(f'Unknown subset')
 
         for sub in subs:
-            path_to_subject_data = os.path.join(betas_path, f'sub{sub:02d}')
-            
-            self.betas.extend(load_betas(path_to_subject_data, 
-                                            rois=rois, 
-                                            avg_reps=avg_reps,
-                                            subset=subset))
+            if load_all_in_ram: # TODO FINISH THIS
+                path_to_subject_data = os.path.join(betas_path, f'sub{sub:02d}')
+                
+                self.betas.extend(load_betas(path_to_subject_data, 
+                                                rois=rois, 
+                                                avg_reps=avg_reps,
+                                                subset=subset))
 
-            self.targets.extend(self.load_target_vectors_boldmoments(targets_path, 
-                                                             subset=subset,
-                                                             repeat_targets=repeat_targets))
+                self.targets.extend(self.load_target_vectors_boldmoments(targets_path, 
+                                                                subset=subset,
+                                                                repeat_targets=repeat_targets))
+            else:
+                self.betas_filenames.extend( 
+                    self.gather_betas_impulse_filenames(sub)
+                )
+                self.targets_filenames.extend( 
+                    self.gather_target_filenames()
+                )
 
 
 
     def __len__(self):
-        return len(self.betas)
+        if self.load_all_in_ram:
+            return len(self.betas)
+        else:
+            return len(self.betas_filenames)
 
     def __getitem__(self, idx):
-        return self.betas[idx], self.targets[idx]
 
+        if self.load_all_in_ram:
+            ret = (self.betas[idx], self.targets[idx])
+        
+        else:
+            beta = self.load_beta(idx)
+            target = self.load_target(idx)
+            ret = (beta, target)
+
+        if self.return_filename:
+            ret = ret + (self.betas_filenames[idx], self.targets_filenames[idx])
+        
+        return ret
+    
+
+    def load_beta(self, idx):
+        betas = []
+        for roi in self.rois:
+            roi_folder = roi+'_betas-GLMsingle_type-typed_z=1'
+            beta_filename = self.betas_filenames[idx].replace('ROI_FOLDER_PLACEHOLDER', roi_folder)
+            betas.append( np.load(os.path.join(self.betas_path, 
+                                               beta_filename))
+            )
+        return np.concatenate(betas) 
+
+    def load_target(self, idx):
+        target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
+        if self.flatten_targets:
+            return target.reshape(-1)
+        return target
+    
+    def gather_betas_impulse_filenames(self, sub: int) -> list:
+            
+        betas_filenames = []
+        
+        for i in self.stim_idxs:
+            if self.avg_reps:
+                betas_filenames.append(
+                    os.path.join(f'sub{sub:02d}', 'indiv_npys_avg', 'ROI_FOLDER_PLACEHOLDER', f'{i:04d}.npy')
+                )
+            else:
+                for rep in range(self.repeat_targets):
+                    betas_filenames.append(
+                        os.path.join(f'sub{sub:02d}', 'indiv_npys', 'ROI_FOLDER_PLACEHOLDER', f'{i:04d}_{rep}.npy')
+                    )
+        return betas_filenames
+    
+    def gather_target_filenames(self) -> list:
+                
+        targets_filenames = []
+
+        for i in self.stim_idxs:
+            for _ in range(self.repeat_targets):
+                targets_filenames.append(f'{i:04d}.npy')
+
+        return targets_filenames
 
     def load_boldmoments_betas_impulse(self,
                                        path_to_subject_data: str, 
-                                    rois: list, 
-                                    avg_reps: bool = True,
-                                    subset: str = 'train',
-                                    use_noise_ceiling: bool = True) -> None:
+                                        rois: list, 
+                                        avg_reps: bool = True,
+                                        subset: str = 'train',
+                                        use_noise_ceiling: bool = True) -> None:
         """
         load betas obtained from assuming the video is an impulse into list that can be used for regression. 
         Loads all the betas for BoldMoments. List should contain N elements, corresponding to the N videos in the selected subset. 
@@ -308,7 +473,6 @@ class BMDBetasAndTargetsDataset(data.Dataset):
 
             # print(b.shape)
             # print(b.min(), b.max())
-
                 
             betas.append(b)
 
