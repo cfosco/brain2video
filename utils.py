@@ -165,13 +165,15 @@ def prompt_list_from_boldmoments_annots(annots):
 
 def compute_metrics(targets, preds, verbose=True):
     # Compute MSE
-    mse = np.mean((targets - preds) ** 2)
+    mse = np.mean(np.mean((targets - preds) ** 2, axis=0))
 
     # Compute MAE
-    mae = np.mean(np.abs(targets - preds))
+    mae = np.mean(np.mean(np.abs(targets - preds), axis=0))
 
-    # Compute r2
-    r2 = 1 - np.sum((targets - preds) ** 2) / np.sum((targets - np.mean(targets)) ** 2)
+    # Compute R2
+    ssr = np.sum((targets - preds) ** 2, axis=0)
+    sst = np.sum((targets - np.mean(targets, axis=0)) ** 2, axis=0)
+    r2 = np.mean(1 - (ssr / sst))
 
     # Compute correlation score
     corr = correlation_score(targets.T, preds.T).mean().item()
