@@ -121,11 +121,13 @@ def main():
     for i in range(len(z)):
         # Reconstruct videos
         print("Reconstructing video", idx_start + i)
+        # This pipe doesn't support the prompt_embeds argument
+        # and requires a text prompt
         rec_vid_frames = pipe(
             latents=z[i],
-            prompt_embeds=c[i].unsqueeze(0),
+            # prompt_embeds=c[i].unsqueeze(0),
             num_inference_steps=50,
-            strength=0.3,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+            # strength=0.3,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
         ).frames
 
         print(
