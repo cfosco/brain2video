@@ -15,9 +15,7 @@ from diffusers import (
 from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_zero import (
     CrossFrameAttnProcessor,
 )
-from diffusers.utils import load_image
 from PIL import Image
-from transformers import pipeline
 
 OUTPUT_DIR = "test_outputs"
 
@@ -108,6 +106,8 @@ def make_controlnet_pipeline(variant: str) -> StableDiffusionControlNetPipeline:
         "runwayml/stable-diffusion-v1-5",
         controlnet=controlnet,
         torch_dtype=torch.float16,
+        safey_checker=None,
+        requires_safety_checker=False,
     )
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)  # type: ignore
     pipe.enable_model_cpu_offload()
@@ -144,7 +144,10 @@ def text2video_zero_posecontrol():
         controlnet_id, torch_dtype=torch.float16
     )
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        model_id, controlnet=controlnet, torch_dtype=torch.float16
+        model_id,
+        controlnet=controlnet,
+        torch_dtype=torch.float16,
+        safety_checker=None,
     ).to("cuda")
 
     # Set the attention processor
@@ -175,21 +178,33 @@ def chunk(arr, n):
         yield arr[i : i + n]
 
 
-def text2video_zero_depth():
-    depth_estimator = pipeline('depth-estimation')
-
+def _text2video_zero_depth():
+    # depth_estimator = pipeline('depth-estimation')
+    seed = 42
     video_path = "data/10_videos_for_reconstruction_test/mp4/0045.mp4"
     reader = imageio.get_reader(video_path, "ffmpeg")
-    frame_count = 8
-    video = [Image.fromarray(reader.get_data(i)) for i in range(frame_count)]
+    from extract_targets_depth import load_midas
+
+    midas, transform, device = load_midas()
     depth_images = []
-    for image in video:
-        image = depth_estimator(image)['depth']
-        image = np.array(image)
-        image = image[:, :, None]
-        image = np.concatenate([image, image, image], axis=2)
-        depth_image = Image.fromarray(image)
+    for image in reader:
+        with torch.no_grad():
+            image = transform(image).to(device)
+            depth = midas(image)
+            depth = 255 * (depth - depth.min()) / (depth.max() - depth.min())
+            depth = (
+                depth.squeeze()[..., None]
+                .repeat(1, 1, 3)
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+
+        depth_image = Image.fromarray(depth)
+        depth_image = depth_image.resize((512, 512))
         depth_images.append(depth_image)
+
+    depth_images = depth_images[::4]
 
     imageio.mimsave("depth_input_video.mp4", depth_images, fps=4)
     pipe = make_controlnet_pipeline("depth")
@@ -197,12 +212,115 @@ def text2video_zero_depth():
     # Set the attention processor
     pipe.unet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
     pipe.controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
-    prompt = "a smiling baby"
-    out = pipe(
-        prompt=[prompt] * len(depth_images),
-        image=depth_images,
-    ).images
-    imageio.mimsave("depth_output_video.mp4", out, fps=4)
+
+    # fix latents for all frames
+    latents = torch.randn((1, 4, 64, 64), device="cuda", dtype=torch.float16).repeat(
+        len(depth_images), 1, 1, 1
+    )
+    prompt = "a baby licking a spatula"
+    out = []
+    generator = torch.Generator(device="cuda")
+    for inds in chunk(range(len(depth_images)), 12):
+        dimage = [depth_images[i] for i in inds]
+        batch_latents = latents[inds]
+        generator.manual_seed(seed)
+        result = pipe(
+            prompt=[prompt] * len(dimage),
+            image=dimage,
+            latents=batch_latents,
+            generator=generator,
+            video_length=len(dimage),
+        ).images
+        out.append(result)
+    result = np.concatenate(out)
+    imageio.mimsave("depth_output_video.mp4", result, fps=6)
+
+
+def text2video_zero_depth():
+
+    seed = 42
+    video_path = "data/10_videos_for_reconstruction_test/mp4/0045.mp4"
+    reader = imageio.get_reader(video_path, "ffmpeg")
+    from extract_targets_depth import load_midas
+
+    midas, transform, device = load_midas()
+    depth_images = []
+    for image in reader:
+        with torch.no_grad():
+            image = transform(image).to(device)
+            depth = midas(image)
+            depth = 255 * (depth - depth.min()) / (depth.max() - depth.min())
+            depth = (
+                depth.squeeze()[..., None]
+                .repeat(1, 1, 3)
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+
+        depth_image = Image.fromarray(depth)
+        depth_image = depth_image.resize((512, 512))
+        depth_images.append(depth_image)
+
+    depth_images = depth_images[::4]
+
+    imageio.mimsave("depth_input_video.mp4", depth_images, fps=4)
+    pipe = make_controlnet_pipeline("depth")
+
+    # Set the attention processor
+    pipe.unet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
+    pipe.controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
+
+    # fix latents for all frames
+    latents = torch.randn((1, 4, 64, 64), device="cuda", dtype=torch.float16).repeat(
+        len(depth_images), 1, 1, 1
+    )
+    prompt = "a baby licking a spatula"
+    out = []
+    generator = torch.Generator(device="cuda")
+    # use the same latents for all frames?
+    batch_latents = latents[:12]
+    for inds in chunk(range(len(depth_images)), 12):
+        dimage = [depth_images[i] for i in inds]
+        batch_latents = batch_latents[: len(dimage)]
+        generator.manual_seed(seed)
+        result = pipe(
+            prompt=[prompt] * len(dimage),
+            image=dimage,
+            latents=batch_latents,
+            generator=generator,
+        ).images[1:]
+        out.append(result)
+    result = np.concatenate(out)
+    imageio.mimsave("depth_output_video.mp4", result, fps=6)
+
+
+def text2video_zero_depth_reconstruct():
+    input_vector_path = 'data/target_vectors/depth_unflattened/0002.npy'
+    input_vector = np.load(input_vector_path)
+    print(input_vector.shape)
+    image = input_vector[:, :, None]
+    image = np.concatenate([image, image, image], axis=2)
+    print(image.shape)
+    print(image.min(), image.max())
+    depth_image = Image.fromarray(image)
+    # upscale image to 256x256
+    depth_image = depth_image.resize((256, 256))
+    depth_images = [depth_image] * 8
+    imageio.mimsave("depth_reconstruct_input_video.mp4", depth_images, fps=4)
+
+    pipe = make_controlnet_pipeline("depth")
+
+    pipe.unet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
+    pipe.controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
+
+    with torch.inference_mode():
+        prompt = "a smiling baby"
+        out = pipe(
+            prompt=[prompt] * len(depth_images),
+            image=depth_images,
+        ).images
+        imageio.mimsave("depth_reconstruct_video.mp4", out, fps=4)
 
 
 def text2video_zero_edge_control():
