@@ -186,6 +186,24 @@ def compute_metrics(targets, preds, verbose=True):
 
     return {"mse": mse, "mae": mae, "r2": r2, "corr": corr}
 
+def load_frames_to_npy(frame_folder, skip_frames=1):
+    """Loads frames with cv2.imread and returns them as a numpy array.
+    Frames are in BGR format.
+
+    Args:
+    - frame_folder (str): Path to the folder containing the frames.
+    - skip_frames (int): Number of frames to skip between each frame.
+    """
+    frames = []
+    frame_filenames = os.listdir(frame_folder)
+    for i in range(0, len(frame_filenames), skip_frames):
+        frame_path = os.path.join(frame_folder, frame_filenames[i])
+        frame = cv2.imread(frame_path)
+        frames.append(frame) 
+
+    return np.stack(frames)
+
+
 
 def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268):
     """
