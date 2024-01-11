@@ -35,8 +35,8 @@ def main(args):
     get_and_save_z_targets_nsd(pipe, 
                            args.nsd_path, 
                            batch_size=80, 
-                           resolution=268,
-                           output_path=os.path.join(args.output_path, 'z_zeroscope_unflattened'))
+                           resolution=268, 
+                           output_path=os.path.join(args.output_path, 'z_zeroscope'))
 
     # print("Getting c targets")
     ## Get c 
@@ -167,7 +167,7 @@ def images_to_latent_vectors(pixels, pipe, return_flattened=False):
     return latents
     
 
-def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattened=True):
+def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattened=False):
     nf = pixels.shape[1]
     nv = pixels.shape[0]
     pixels = rearrange(pixels, "v f c h w -> (v f) c h w")

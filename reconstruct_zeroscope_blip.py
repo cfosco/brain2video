@@ -132,7 +132,7 @@ def main(args):
             prompt=caption,
             video=z[None] * args.latent_factor,
             num_inference_steps=50,
-            strength=0.2,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+            strength=0.5,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
         ).frames
 
         print(
@@ -242,7 +242,7 @@ if __name__ == "__main__":
         "--output_path",
         type=str,
         help="Output path for reconstructed videos",
-        defaultuth="./reconstructions/BMDgeneral_sub01_blip_gt",
+        default="./reconstructions/BMDgeneral_sub01_test2",
     )
 
     parser.add_argument(
