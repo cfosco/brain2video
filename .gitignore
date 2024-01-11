@@ -1,10 +1,11 @@
 # large brain data
-data/stimuli/*
+data/stimuli_bmd/*
+data/stimuli_had/*
 data/betas/*
 data/betas_nsd/*
-data/betas_raw/*
-data/betas_impulse/*
-data/target_vectors/*
+data/betas_raw_bmd/*
+data/betas_impulse_bmd/*
+data/target_vectors_bmd/*
 data/target_vectors_nsd/*
 data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
@@ -12,6 +13,9 @@ data/tsne_results
 data/stimuli_had/*
 data/betas_cifti_had/*
 data/betas_cifti_bmd/*
+data/viclip_embeddings_bmd/*
+data/viclip_embeddings_had/*
+data/viclip_embeddings_nsd/*
 
 # mbm
 mbm_encoder/pretrained_model/*
