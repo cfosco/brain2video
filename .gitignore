@@ -16,6 +16,7 @@ data/betas_cifti_bmd/*
 data/viclip_embeddings_bmd/*
 data/viclip_embeddings_had/*
 data/viclip_embeddings_nsd/*
+data/nsd/*.tar
 
 # mbm
 mbm_encoder/pretrained_model/*

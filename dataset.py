@@ -8,6 +8,7 @@ from nsd_access import NSDAccess
 import pickle as pkl
 from matplotlib import pyplot as plt
 from PIL import Image
+import scipy
 
 
 
@@ -91,10 +92,11 @@ class NSDBetasAndTargetsDataset(data.Dataset):
     def __init__(self, 
                  betas_path,
                  targets_path,
+                 nsd_path='data/nsd',
                  avg_reps=False, 
                  rois=['BMDgeneral'],
                  subs=[1],
-                 subset='train',
+                 subset='both',
                  load_all_in_ram=False,
                  return_filename=False,
                  flatten_targets=True,
@@ -133,6 +135,9 @@ class NSDBetasAndTargetsDataset(data.Dataset):
         else:
             self.repeat_targets = 1  
      
+        nsd_expdesign = scipy.io.loadmat(os.path.join(nsd_path,'nsd_expdesign.mat'))
+        test_idxs = nsd_expdesign['sharedix'] -1
+
         for sub in subs:
             if load_all_in_ram:
                 self.betas.extend(self.load_nsd_betas_impulse(sub))
@@ -142,6 +147,13 @@ class NSDBetasAndTargetsDataset(data.Dataset):
                 with open(os.path.join(betas_path,f'sub{sub:02d}/events_imgtag-73k_id.pkl'), 'rb') as f:
                     self.stim_idxs = [i-1 for i in pkl.load(f)[0]] # Substract 1 because the pkl is 1-indexed, but nsda.read_images expects 0-indexed inputs (goes from 0-72999)
                 
+                if subset == 'train':
+                    self.stim_idxs = [i for i in self.stim_idxs if i not in test_idxs]
+                elif subset == 'test':
+                    self.stim_idxs = [i for i in self.stim_idxs if i in test_idxs]
+
+                print(f'self.stim_idxs len for subset {subset}',len(self.stim_idxs))
+
                 self.betas_filenames.extend( 
                     self.gather_betas_impulse_filenames(sub)
                 )
@@ -298,7 +310,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         Args:
             betas_path (str): path to BOLDMoments betas. 
                 This path should point to a folder containing subject subfolders called sub01, sub02, etc.
-            targets_path (str): path to target vectors. 
+            targets_path (str): path to target vectors, e.g. data/target_vectors_bmd/z_zeroscope
             avg_train_reps (bool): whether to average over repetitions in training data
             beta_type (str): 'impulse' or 'raw'
             rois (list): list of ROIs to include
@@ -358,7 +370,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
 
                 self.targets.extend(self.load_target_vectors_boldmoments(targets_path, 
                                                                 subset=subset,
-                                                                repeat_targets=repeat_targets))
+                                                                repeat_targets=self.repeat_targets))
             else:
                 self.betas_filenames.extend( 
                     self.gather_betas_impulse_filenames(sub)
@@ -424,6 +436,8 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         return betas_filenames
     
     def gather_target_filenames(self) -> list:
+        """Gathers filenames for target vectors. 
+        Assumes that target vectors are named 0001.npy, 0002.npy, etc."""
                 
         targets_filenames = []
 
@@ -535,11 +549,170 @@ class BMDBetasAndTargetsDataset(data.Dataset):
 
 
 
+### ---- Datasets for Reconstruction
+
+class BMDReconstructionDataset():
+    '''Dataset for BOLDMoments data returning conditioning vectors (either ground truth or predicted) that can be 
+    used by a diffusion model (e.g. zeroscope) to reconstruct the BMD videos.'''
+    
+    def __init__(self,
+                 cond_vectors_paths_dict,
+                 subset='test',
+                 return_filenames=True,
+                 rearrange_funcs={}):
+        '''Constructor for BMDReconstructionDataset.
+
+        Args:
+            cond_vectors_paths_dict (dict): dictionary with keys corresponding 
+                to the conditioning vector name (e.g. 'z', 'blip' and 'c') and 
+                values corresponding to the paths to the conditioning vectors folders. 
+                The folders should either contain a large npy file with all the vectors 
+                for a subset of BMD (e.g. preds_train) or a set of individual npys for each BMD video (e.g. 1001.npy)
+            subset (str): 'train' or 'test'
+            return_filenames (bool): whether to return the filename of the conditioning vector
+        '''
+
+        self.cond_vectors_paths_dict = cond_vectors_paths_dict
+        self.subset = subset
+        self.return_filenames = return_filenames
+        self.rearrange_funcs = rearrange_funcs
+
+        self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys())
+        self.large_npys = {}
+        # Check if given path contains large singular npy files or individual npy files for each stimuli
+
+        for cond_name, path in cond_vectors_paths_dict.items():
+            if self.check_if_large_npys(path):
+                self.large_npys[cond_name] = np.load(os.path.join(path, f'preds_{subset}.npy'))
+
+        ran = range(1,1001) if subset=='train' else range(1001,1103) # Indexes of train and test sets of BMD
+        self.filenames = [f'{i:04d}.npy' for i in ran]
+
+
+    def __len__(self):
+        return len(self.filenames)
+    
+    def __getitem__(self, idx):
+        
+        ret = ()
+        for cond_name, path in self.cond_vectors_paths_dict.items():
+            print('cond_name',cond_name)
+            print('path',path)
+            if cond_name not in self.cond_vectors_to_use:
+                continue
+            if cond_name in self.large_npys:
+                cond_vector = self.large_npys[cond_name][idx]
+                is_flat = True
+            else:
+                cond_vector = np.load(os.path.join(path, self.filenames[idx])).squeeze()
+                if cond_vector.ndim == 1:
+                    is_flat = True
+                else:
+                    is_flat = False
+
+            print(f'{cond_name}.shape before rearrange',cond_vector.shape)
+            if cond_name in self.rearrange_funcs and is_flat:
+                cond_vector = self.rearrange_funcs[cond_name](cond_vector)
+            
+            #DEBUG
+            if cond_name=='z' and cond_vector.shape[0]==15: cond_vector = cond_vector.swapaxes(0,1)
+            print('final cond_vector.shape',cond_vector.shape)
+            cond_vector = torch.tensor(cond_vector).float()
+            ret = ret + (cond_vector,)
+            
+        if self.return_filenames:
+            return ret + (self.filenames[idx],)
+        
+
+
+        return ret
+
+    def get_cond_vector_names(self):
+        return self.cond_vectors_paths_dict.keys()
+
+    def set_cond_vectors_to_use(self, cond_vectors_to_use):
+        '''Allows user to set the exact conditioning vectors that __getitem__ returns by providing a list with names. 
+        The names must match existing keys in the cond_vectors_paths_dict.
+        
+        Args:
+            cond_vectors_to_use (list): list of conditioning vector names to use (e.g. ['z', 'blip'])
+        '''
+        self.cond_vectors_to_use = cond_vectors_to_use
+
+    def check_if_large_npys(self, path):
+        '''Check if given path contains large singular npy files or individual npy files for each stimuli'''
+        if os.path.isfile(os.path.join(path, f'preds_{self.subset}.npy')):
+            return True
+        else:
+            return False
+
+
+# class NSDReconstructionDataset():
+#     '''Dataset for NSD data returning conditioning vectors (either ground truth or predicted) that can be 
+#     used by a diffusion model (e.g. zeroscope) to reconstruct the NSD images.'''
+    
+#     def __init__(self,
+#                  cond_vectors_paths_dict,
+#                  subset='test',
+#                  return_filenames=True,
+#                  rearrange_expressions=None):
+#         '''Constructor for NSDReconstructionDataset.
+
+#         Args:
+#             cond_vectors_paths_dict (dict): dictionary with keys corresponding 
+#                 to the conditioning vector name (e.g. 'z', 'blip' and 'c') and 
+#                 values corresponding to the paths to the conditioning vectors folders. 
+#                 The folders should either contain a large npy file with all the vectors 
+#                 for a subset of NSD (e.g. preds_train) or a set of individual npy files for each NSD image (e.g. 1001.npy)
+#             subset (str): 'train' or 'test'
+#             return_filenames (bool): whether to return the filename of the conditioning vector
+#         '''
+
+#         self.cond_vectors_paths_dict = cond_vectors_paths_dict
+#         self.subset = subset
+#         self.return_filenames = return_filenames
+
+#         self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys())
+#         self.large_npys = {}
+#         # Check if given path contains large singular npy files or individual npy files for each stimuli
+
+#         for cond_name, path in cond_vectors_paths_dict.items():
+#             if self.check_if_large_npys(path):
+#                 self.large_npys[cond_name] = np.load(os.path.join(path, f'preds_{subset}.npy'))
+
+#         ran = range(0,73000) # Indexes of train and test sets of NSD
+#         self.filenames = [f'{i:06d}.npy' for i in ran]
+
+
+#     def __len__(self):
+#         return len(self.filenames)
+    
+#     def __getitem__(self, idx):
+        
+#         ret = ()
+#         for cond_name, path in self.cond_vectors_paths_dict.items():
+#             if cond_name not in self.cond_vectors_to_use:
+#                 continue
+#             if cond_name in self.large_npys:
+#                 cond_vector = self.large_npys[cond_name][idx]
+#                 flattened_vecs = True
+#             else:
+#                 cond_vector = np.load(os.path.join(path, self.filenames[idx]))
+#                 if cond_vector.ndim == 1:
+#                     flattened_vecs = True
+#             if self.rearrange_expressions is not None and cond_name in self.rearrange_expressions and flattened_vecs:
+#                 cond_vector = rearrange(cond_vector, self.rearrange_expressions[cond_name])
+            
+#         if self.return_filenames:
+#             return ret + (self.filenames[idx],)
+#         return ret
+
+
+
 ### ---- Utility functions
 
-def make_nsd_traintest_for_subj(subj, use_captions=False, use_fmri=False):
-
-    idxs_train, idxs_test = get_nsd_idxs_for_subj(subj) 
-    train_dataset = NSDDataset(idxs_train, use_captions=use_captions, use_fmri=use_fmri)   
-    test_dataset = NSDDataset(idxs_test, use_captions=use_captions, use_fmri=use_fmri)
-    return train_dataset, test_dataset
+# def make_nsd_traintest_for_subj(subj, use_captions=False, use_fmri=False):
+#     idxs_train, idxs_test = get_nsd_idxs_for_subj(subj) 
+#     train_dataset = NSDDataset(idxs_train, use_captions=use_captions, use_fmri=use_fmri)   
+#     test_dataset = NSDDataset(idxs_test, use_captions=use_captions, use_fmri=use_fmri)
+#     return train_dataset, test_dataset

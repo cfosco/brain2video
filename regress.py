@@ -6,7 +6,7 @@ from himalaya.backend import set_backend
 from torch.utils.data import ConcatDataset, DataLoader
 import yaml
 import wandb
-
+import torch
 from einops import rearrange
 from tqdm import tqdm
 
@@ -37,28 +37,46 @@ def main(args):
     else:
         repeat_train = 3
 
-    ## Paths to fMRI data (our input features) and vectors to regress (our output targets)
-    nsd_betas_path = f'data/betas_nsd'
-    nsd_targets_path = f'data/target_vectors_nsd/{config.target}'
-    bmd_betas_path = f'data/{config.betas_type}'
-    bmd_targets_path = f'data/target_vectors/{config.target}'
-
     ## Build method string
-    method = f'regressor:{config.regressor}withscheduleronval_hidden:{config.hidden_size}_fmritype:{config.betas_type}_rois:{"-".join(config.roi)}_avgtrainreps:{config.avg_train_reps}_usensd:{config.use_nsd}'
+    method = f'regressor:{config.regressor}withscheduleronval-hidden:{config.hidden_size}-rois:{"-".join(config.roi)}-avgtrainreps:{config.avg_train_reps}-traindata:{config.train_on}'
     print("Method:", method)
 
-    # If pretrain NSD, load NSD data
-    if args.use_nsd:
+    # Prepare training and testing datasets
+    dataset_train, dataset_test_dict = make_datasets(config.train_on, config.test_on, config)
 
-        nsd_dataset_both = NSDBetasAndTargetsDataset(
-                        betas_path=nsd_betas_path,
-                        targets_path=nsd_targets_path,
-                        avg_reps=False, 
-                        rois=config.roi,
-                        subs=config.nsd_sub,
-                        subset='both',
-                        load_all_in_ram=False,
-                        num_frames_to_simulate=1 if config.target=='blip' else 15)
+    # # If pretrain NSD, load NSD data
+    # if args.use_nsd:
+
+    #     nsd_dataset_both = NSDBetasAndTargetsDataset(
+    #                     betas_path=nsd_betas_path,
+    #                     targets_path=nsd_targets_path,
+    #                     avg_reps=False, 
+    #                     rois=config.roi,
+    #                     subs=config.nsd_sub,
+    #                     subset='both',
+    #                     load_all_in_ram=False,
+    #                     num_frames_to_simulate=1 if config.target=='blip' else 15)
+        
+
+    #     nsd_dataset_train = NSDBetasAndTargetsDataset(
+    #                     betas_path=nsd_betas_path,
+    #                     targets_path=nsd_targets_path,
+    #                     avg_reps=False, 
+    #                     rois=config.roi,
+    #                     subs=config.nsd_sub,
+    #                     subset='train',
+    #                     load_all_in_ram=False,
+    #                     num_frames_to_simulate=1 if config.target=='blip' else 15)
+        
+    #     nsd_dataset_test = NSDBetasAndTargetsDataset(
+    #                     betas_path=nsd_betas_path,
+    #                     targets_path=nsd_targets_path,
+    #                     avg_reps=False, 
+    #                     rois=config.roi,
+    #                     subs=config.nsd_sub,
+    #                     subset='test',
+    #                     load_all_in_ram=False,
+    #                     num_frames_to_simulate=1 if config.target=='blip' else 15)
 
         # fmri_feat_train_nsd = load_nsd_betas_impulse(
         #     f'data/betas_nsd/{subject}', roi=roi, avg_train_reps=config.avg_train_reps
@@ -69,23 +87,8 @@ def main(args):
         #     repeat_train=repeat_train,
         # )
 
-    bmd_dataset_train = BMDBetasAndTargetsDataset(
-                        bmd_betas_path,
-                        bmd_targets_path,
-                        avg_reps=False, 
-                        rois=config.roi,
-                        subs=config.bmd_sub,
-                        subset='train',
-                        load_all_in_ram=False)
-    
-    bmd_dataset_test = BMDBetasAndTargetsDataset(
-                        bmd_betas_path,
-                        bmd_targets_path,
-                        avg_reps=False, 
-                        rois=config.roi,
-                        subs=config.bmd_sub,
-                        subset='test',
-                        load_all_in_ram=False)
+    # if args.use_bmd:
+
     
     ## Load train and test input features
     # if fmri_type == 'betas_impulse':
@@ -103,15 +106,15 @@ def main(args):
     # )
 
     # Concatenate NSD data
-    if args.use_nsd:
+    # if args.use_nsd:
 
-        dataset_train = ConcatDataset([nsd_dataset_both, bmd_dataset_train])
-        dataset_train.subset = 'train'
-        dataset_train.return_filename = False
-        print("Instantiated Train dataset as concatenation of NSD and BMD datasets")
-        print("Length of nsd_dataset_both:", len(nsd_dataset_both))
-        print("Length of bmd_dataset_train:", len(bmd_dataset_train))
-        print("Length of concatenated dataset:", len(dataset_train))
+    #     dataset_train = ConcatDataset([nsd_dataset_both, bmd_dataset_train])
+    #     dataset_train.subset = 'train'
+    #     dataset_train.return_filename = False
+    #     print("Instantiated Train dataset as concatenation of NSD and BMD datasets")
+    #     print("Length of nsd_dataset_both:", len(nsd_dataset_both))
+    #     print("Length of bmd_dataset_train:", len(bmd_dataset_train))
+    #     print("Length of concatenated dataset:", len(dataset_train))
         # print("Shapes before concatenating NSD data:")
         # print(f"fmri_feat_train: {fmri_feat_train.shape}")
         # print(f"target_train: {target_train.shape}")
@@ -123,12 +126,12 @@ def main(args):
         # print("Shapes after concatenating NSD data:")
         # print(f"fmri_feat_train: {fmri_feat_train.shape}")
         # print(f"target_train: {target_train.shape}")
-    else:
-        dataset_train = bmd_dataset_train
+    # else:
+    #     dataset_train = bmd_dataset_train
     
-    dataset_test = bmd_dataset_test
-    print("Instantiated Test dataset as BMD dataset")
-    print("Length of bmd_dataset_test:", len(bmd_dataset_test))
+    # dataset_test = bmd_dataset_test
+    # print("Instantiated Test dataset as BMD dataset")
+    # print("Length of bmd_dataset_test:", len(bmd_dataset_test))
 
 
     ## Define regressor
@@ -148,19 +151,33 @@ def main(args):
     else:
         raise NotImplementedError(f"Regressor {config.regressor} not implemented")
 
-    ## Fit model
+    ## Train model
     print(f'Training Regressor for {config.bmd_sub}. Input ROIs: {config.roi}. Target: {config.target}. Training data size: {len(dataset_train)}')
+    
+    
     if config.regressor == 'himalaya-ridge':
         pipeline.fit(dataset_train.X, dataset_train.y)
     else:
         dl_train = DataLoader(dataset_train, batch_size=512, shuffle=True)
-        dl_test = DataLoader(dataset_test, batch_size=1024, shuffle=False)
-        pipeline.fit_dl(dl_train, dl_test, epochs=40)
+        for d in dataset_test_dict:
+            dl_test_dict = DataLoader(dataset_test_dict[d], batch_size=512, shuffle=False)
+        
+        train_model(pipeline, 
+                dl_train, 
+                dl_test_dict, 
+                optimizer='adamw', 
+                criterion = torch.nn.MSELoss(), 
+                lr=0.001, 
+                l1_lambda=1e-8,
+                l2_lambda=1e-4,
+                epochs = 100, 
+                device='cuda')
+        # pipeline.fit_dl(dl_train, dl_test_dict, epochs=2)
         # pipeline.fit(fmri_feat_train, target_train, X_test=fmri_feat_test, y_test=target_test)
 
     print("Evaluating and saving")
-    save_path = f'estimated_vectors/{method}_sub{config.bmd_sub}_{config.target}'
-    eval_and_save(save_path, pipeline, datasets=[dataset_test])
+    save_path = f'estimated_vectors/{config.target}/{method}-sub{config.bmd_sub}'
+    eval_and_save(save_path, pipeline, datasets=dl_test_dict)
 
     # preds_train = pipeline.predict(dl_train)
     # preds_test = pipeline.predict(dl_test)
@@ -188,11 +205,62 @@ def main(args):
     # with open(f'{save_path}/test_metrics:{test_metrics}.pkl', 'wb') as f:
     #     pkl.dump(test_metrics, f)
 
+def make_datasets(train_on, test_on, config):
+
+    make_nsd_dataset = lambda x: NSDBetasAndTargetsDataset(
+                        betas_path=config.nsd_betas_path,
+                        targets_path=os.path.join(config.nsd_targets_path, config.target),
+                        avg_reps=False, 
+                        rois=config.roi,
+                        subs=config.nsd_sub,
+                        subset=x,
+                        load_all_in_ram=False,
+                        num_frames_to_simulate=1 if config.target=='blip' else 15)
+
+    make_bmd_dataset = lambda x: BMDBetasAndTargetsDataset(
+                            betas_path=config.bmd_betas_path,
+                            targets_path=os.path.join(config.bmd_targets_path, config.target),
+                            avg_reps=False, 
+                            rois=config.roi,
+                            subs=config.bmd_sub,
+                            subset=x,
+                            load_all_in_ram=False)
+    
+    dataset_makers = {'nsd': make_nsd_dataset, 
+                      'bmd': make_bmd_dataset}
+
+    train_datasets = []
+    test_datasets = {}
+
+    for dataset_name in train_on:
+        maker = dataset_makers[dataset_name]
+        if dataset_name not in test_on:
+            train_datasets.append(maker('both'))
+        else:
+            train_datasets.append(maker('train'))
+    
+    train_dataset = ConcatDataset(train_datasets)
+
+    for dataset_name in test_on:
+        maker = dataset_makers[dataset_name]
+        test_datasets[dataset_name] = maker('test')
+
+    return train_dataset, test_datasets
+
 
 def eval_and_save(save_path, pipeline, datasets):
+    '''Evaluates over all datasets and saves predictions and metrics
+    
+    Args:
+    save_path (str): path to save predictions and metrics
+    pipeline : pipeline to use for predictions
+    datasets (dict of datasets): datasets to evaluate. Typically train and test datasets from the same data.
+      Each dataset should have a .subset attribute
+    '''
     os.makedirs(save_path, exist_ok=True)
 
-    for d in datasets:
+    for d in datasets.items():
+        d.flatten_targets = False
         d.return_filename = True
         pred_and_targ_dict = {}
         all_preds = []
@@ -200,25 +268,28 @@ def eval_and_save(save_path, pipeline, datasets):
         for x, y, _, target_filename in d:
             preds = pipeline.predict(x[None])
             preds = to_numpy(preds)
+            print('preds.shape, y.shape',preds.shape, y.shape)
 
             if target_filename not in pred_and_targ_dict:
                 pred_and_targ_dict[target_filename] = {'preds': [], 'targ': None}
             
             pred_and_targ_dict[target_filename]['preds'].append(preds)
-            pred_and_targ_dict[target_filename]['targ'] = y[None]
+            pred_and_targ_dict[target_filename]['targ'] = y
 
         for target_filename, pt in pred_and_targ_dict.items():
-            avg_preds = np.mean(pt['preds'], axis=0)
+            avg_preds = np.mean(pt['preds'], axis=0) # Test time augmentation on the repetitions
             all_preds.append(avg_preds)
-            all_targets.append(pt['targ'])
+            all_targets.append(pt['targ'].reshape(-1)[None]) # Flatten targets to compute metrics (TODO: check that this reshape is correctly matching the flattening done in the dataset)
 
-            np.save(os.path.join(save_path, target_filename.split("/")[-1]), avg_preds)
+            # Save predicted vectors in their original shape
+            avg_preds_unflattened = avg_preds.reshape(pt['targ'].shape) # TODO: Check that this reshaping reshapes in the right way
+            np.save(os.path.join(save_path, target_filename.split("/")[-1]), avg_preds_unflattened)
 
-        print("Metrics for", d.subset)
+        print(f"Metrics for", d.subset)
         metrics = compute_metrics(np.concatenate(all_targets), np.concatenate(all_preds), verbose=True)
 
-        # ## Save metrics dict as pkl
-        with open(f'{save_path}/_metrics:{metrics}.pkl', 'wb') as f:
+        ## Save metrics dict as pkl
+        with open(f'{save_path}/_{d.subset}_metrics:{metrics}.pkl', 'wb') as f:
             pkl.dump(metrics, f)
 
 def to_numpy(arr):
@@ -273,6 +344,53 @@ def make_pipeline_for_himalaya_regressor(config, backend):
 
     return pipeline
 
+
+def train_model(model, 
+                train_dataloader, 
+                test_dataloader, 
+                optimizer='adamw', 
+                criterion = torch.nn.MSELoss(), 
+                lr=0.001, 
+                l1_lambda=1e-8,
+                l2_lambda=1e-4,
+                epochs = 100, 
+                device='cuda'):
+    
+    model.train()
+
+    if optimizer == 'adam' or optimizer == 'adamw' or optimizer == None:
+        opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=l2_lambda)
+    elif optimizer == 'sgd':
+        opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=l2_lambda)
+
+
+    for epoch in range(epochs):
+        for i, (batch_X, batch_y) in enumerate(train_dataloader):
+            opt.zero_grad()
+            batch_X = batch_X.float().to(device)
+            batch_y = batch_y.float().to(device)
+
+            preds = model(batch_X)
+            loss = criterion(preds, batch_y)
+            loss.backward()
+            opt.step()
+
+        # Compute validation error
+        if test_dataloader is not None:
+            model.eval()
+            with torch.no_grad():
+                total_loss = 0.0
+                total_items = 0
+                for batch_X, batch_y in test_dataloader:
+                    batch_X = batch_X.float().to(device)
+                    batch_y = batch_y.float().to(device)
+                    preds_test = model(batch_X)
+                    loss = criterion(preds_test, batch_y)
+                    total_loss += loss.item() * batch_X.size(0)
+                    total_items += batch_X.size(0)
+                avg_loss = total_loss / total_items
+                print(f'Epoch {epoch} Average Validation Loss per Item {avg_loss}')
+            model.train()
 
 # def load_nsd_betas_impulse(
 #     path_to_subject_data: str, roi: list, avg_train_reps=True
@@ -445,12 +563,12 @@ if __name__ == "__main__":
         help="Path to config file",
     )
 
-    parser.add_argument(
-        "--betas_type",
-        type=str,
-        default='betas_impulse',
-        help="fMRI signals to use as features. One of betas_raw, betas_impulse",
-    )
+    # parser.add_argument(
+    #     "--betas_type",
+    #     type=str,
+    #     default='betas_impulse',
+    #     help="fMRI signals to use as features. One of betas_raw, betas_impulse",
+    # )
 
     parser.add_argument(
         "--roi",
@@ -477,10 +595,38 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--nsd_betas_path",
+        type=str,
+        default='data/betas_nsd',
+        help="Path to NSD betas",
+    )
+
+    parser.add_argument(
+        "--nsd_targets_path",
+        type=str,
+        default='data/target_vectors_nsd',
+        help="Path to NSD target vectors",
+    )
+
+    parser.add_argument(
+        "--bmd_betas_path",
+        type=str,
+        default='data/betas_impulse_bmd',
+        help="Path to BMD betas",
+    )
+
+    parser.add_argument(
+        "--bmd_targets_path",
+        type=str,
+        default='data/target_vectors_bmd',
+        help="Path to BMD target vectors",
+    )
+
+    parser.add_argument(
         "--regressor",
         type=str,
         default='mlp',
-        help="Regressor to use. One of himalaya-ridge, autogluon, mlp",
+        help="Regressor to use. One of mlp, swiglu, autogluon",
     )
 
 
@@ -504,6 +650,23 @@ if __name__ == "__main__":
         default=False,
         help="Whether to use NSD data as well",
     )
+
+    parser.add_argument(
+        "--train_on",
+        type=str,
+        default=['bmd', 'nsd'],
+        nargs="*",
+        help="List of datasets to train on. One or multiple of bmd, nsd, nad",
+    )
+
+    parser.add_argument(
+        "--test_on",
+        type=str,
+        default=['bmd', 'nsd'],
+        nargs="*",
+        help="List of datasets to test on. One or multiple of bmd, nsd, nad",
+    )
+    
 
     args = parser.parse_args()
     main(args)
