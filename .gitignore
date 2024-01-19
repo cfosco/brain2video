@@ -1,6 +1,7 @@
 # large brain data
 data/stimuli_bmd/*
 data/stimuli_had/*
+data/stimuli_nod/*
 data/betas/*
 data/betas_nsd/*
 data/betas_raw_bmd/*
@@ -13,6 +14,7 @@ data/tsne_results
 data/stimuli_had/*
 data/betas_cifti_had/*
 data/betas_cifti_bmd/*
+data/betas_cifti_nod/*
 data/viclip_embeddings_bmd/*
 data/viclip_embeddings_had/*
 data/viclip_embeddings_nsd/*

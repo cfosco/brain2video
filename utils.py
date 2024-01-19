@@ -328,3 +328,24 @@ def print_current_gpu_memory():
     print(
         f"GPU Mem -- Total: {int(t)} MB, Reserved: {int(r)}, Allocated: {int(a)}, Free: {int(f)}"
     )
+
+
+
+def norm_and_transp(img):
+    return (np.array(img).transpose(2, 0, 1) / 255.0 ) * 2.0 - 1.0
+
+
+
+
+### PLOTTING FUNCTIONS
+
+def plot_video(video, frames_to_skip=1):
+    """
+    Plot a video with a subplot for each frame, skipping frames_to_skip frames
+    """
+    plt.figure(figsize=(10, 10))
+    for i, frame in enumerate(video[::frames_to_skip]):
+        plt.subplot(4, 4, i + 1)
+        plt.imshow(frame)
+        plt.axis('off')
+    plt.show()

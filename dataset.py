@@ -9,8 +9,116 @@ import pickle as pkl
 from matplotlib import pyplot as plt
 from PIL import Image
 import scipy
+import json
+import cv2
+import torchvision as tv
+from utils import norm_and_transp
+import abc
+
+### --------------- Abstract Dataset Classes
+
+class VideoDataset(data.Dataset, abc.ABC):
+    '''Abstract Dataset class for returning video stimuli.'''
+
+    def __init__(self, 
+                path, 
+                metadata_path = None,
+                subset='train',
+                resolution=244,
+                transform=None,
+                normalize=True,
+                return_filename=False,
+                load_from_frames=False):
+            '''
+            Constructor for a generic VideoDataset.
+                
+        
+            Args:
+                path (str): path to videos. 
+                    This path should point to a folder containing the videos/folders that will be listed in vid_paths.
+                metadata_path (str): path to HAD metadata
+                subset (str): 'train', 'test' or 'both'
+                resolution (int): resolution to resize videos to
+                transform (torchvision.transforms): transforms to apply to videos
+            '''
+            
+            self.path = path
+            self.metadata_path = metadata_path
+            self.subset = subset
+            self.resolution = resolution
+            self.transform = transform
+            self.normalize = normalize
+            self.return_filename = return_filename
+            self.load_from_frames = load_from_frames
+            
+            if transform is not None:
+                self.transform = transform
+
+            self.vid_paths = self.get_video_paths(subset, metadata_path)
 
 
+    @abc.abstractmethod
+    def get_video_paths(self, subset, metadata_path):
+        '''Returns list of video paths for a given subset'''
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.vid_paths)
+    
+    def __getitem__(self, idx):
+        
+        if self.load_from_frames:
+            video = self.load_frames(idx)
+        else:
+            video = self.load_video(idx)
+        
+        if self.transform:
+            video = self.transform(video)
+                
+        return video
+
+    def load_video(self, idx):
+        '''Loads videos with cv2.VideoCapture. 
+        Requires self.path to be a path to the folder containing whatever is in vid_paths.'''
+
+        video_path = os.path.join(self.path, self.vid_paths[idx])
+        cap = cv2.VideoCapture(video_path)
+
+        frames = []
+        while(cap.isOpened()):
+            ret, frame = cap.read()
+            if ret:
+                frames.append(self.preprocess_frame(frame))
+            else:
+                break
+
+        cap.release()
+
+        return np.array(frames)
+
+    def load_frames(self, idx):
+        '''Loads videos frame by frame with cv2.imread and returns a numpy array of frames. 
+        Requires self.path to be a path to the folder containing whatever is in vid_paths,
+        and requires self.vid_paths to be partial paths to frame folders.'''
+        
+        frames_path = os.path.join(self.path, self.vid_paths[idx])
+        frames = []
+
+        for f in sorted(os.listdir(frames_path)):
+            frame = cv2.imread(os.path.join(frames_path, f))
+            frames.append(self.preprocess_frame(frame))
+        
+        return np.array(frames)
+
+    def preprocess_frame(self, frame):
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if self.normalize:
+            frame_rgb = norm_and_transp(frame_rgb)
+        frame_rgb = cv2.resize(frame_rgb, (self.resolution, self.resolution))
+        return frame_rgb
+
+class ImageDataset(data.Dataset, abc.ABC):
+    pass
 
 ### --------------- NSD Datasets
 
@@ -129,9 +237,10 @@ class NSDBetasAndTargetsDataset(data.Dataset):
         self.return_filename = return_filename
         self.flatten_targets = flatten_targets
         self.num_frames_to_simulate = num_frames_to_simulate
+        self.NSD_REPS = 3
 
         if not avg_reps:
-            self.repeat_targets = 3
+            self.repeat_targets = self.NSD_REPS
         else:
             self.repeat_targets = 1  
      
@@ -140,8 +249,8 @@ class NSDBetasAndTargetsDataset(data.Dataset):
 
         for sub in subs:
             if load_all_in_ram:
-                self.betas.extend(self.load_nsd_betas_impulse(sub))
-                self.targets.extend(self.load_target_vectors_nsd(sub))
+                self.betas.extend(self.load_all_nsd_betas_impulse(sub))
+                self.targets.extend(self.load_all_target_vectors_nsd(sub))
             else:
                 # Load pickle with ids of stimuli used for this subject
                 with open(os.path.join(betas_path,f'sub{sub:02d}/events_imgtag-73k_id.pkl'), 'rb') as f:
@@ -184,9 +293,24 @@ class NSDBetasAndTargetsDataset(data.Dataset):
         for roi in self.rois:
             roi_folder = roi+'_betas-GLMsingle_type-typeb_z=1'
             beta_filename = self.betas_filenames[idx].replace('ROI_FOLDER_PLACEHOLDER', roi_folder)
-            betas.append( np.load(os.path.join(self.betas_path, 
-                                               beta_filename))
-            )
+            if self.avg_reps: 
+                # If npy file with average of reps exists, load it. Otherwise, average repetitions on the fly
+                if os.path.exists(os.path.join(self.betas_path, beta_filename)):
+                    betas.append( np.load(os.path.join(self.betas_path, 
+                                                    beta_filename))
+                    )
+                else: # Average repetitions on the fly
+                    rep=[]
+                    for r in range(self.NSD_REPS):
+                        rep.append( 
+                            np.load(os.path.join(self.betas_path, beta_filename[:-4]+f'_{r}.npy'))
+                        )
+                    avg_reps = np.mean(rep, axis=0)
+                    betas.append(avg_reps)
+            else: 
+                betas.append( np.load(os.path.join(self.betas_path, 
+                                                beta_filename))
+                )
         return np.concatenate(betas)
 
     def load_target(self, idx):
@@ -225,8 +349,8 @@ class NSDBetasAndTargetsDataset(data.Dataset):
         return targets_filenames
         
                                       
-
-    def load_nsd_betas_impulse(self,
+    ## Functions to load all in RAM
+    def load_all_nsd_betas_impulse(self,
                                betas_path: str, 
                                sub: int,
                                rois: list, 
@@ -254,7 +378,7 @@ class NSDBetasAndTargetsDataset(data.Dataset):
         return np.concatenate(betas_sub, axis=1)
 
 
-    def load_target_vectors_nsd(self,
+    def load_all_target_vectors_nsd(self,
                                 path_to_target_vectors: str, 
                                 subject: int, 
                                 subset: str = 'train',
@@ -283,6 +407,21 @@ class NSDBetasAndTargetsDataset(data.Dataset):
 
 
 ### --------------- BOLDMoments Datasets
+
+class BMDVideoDataset(VideoDataset):
+    '''Dataset for BMD returning video stimuli.'''
+
+    def get_video_paths(self, subset):
+        if subset == 'train':
+            vid_paths = ['%04d.mp4' % i for i in range(1,1001)]
+        elif subset == 'test':
+            vid_paths = ['%04d.mp4' % i for i in range(1001,1103)]
+        elif subset == 'all':
+            vid_paths = ['%04d.mp4' % i for i in range(1,1103)]
+        else: 
+            raise ValueError(f'Unknown subset {subset}')
+
+        return vid_paths
 
 class BMDBetasAndTargetsDataset(data.Dataset):
     '''Dataset for BOLDMoments data returning betas and targets.
@@ -336,6 +475,8 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         self.use_noise_ceiling = use_noise_ceiling
         self.return_filename = return_filename
         self.flatten_targets = flatten_targets
+        self.BMD_TRAIN_REPS = 3
+        self.BMD_TEST_REPS = 10
 
         # BMD's stimuli indexes are 1-1000 if train, 1001-1102 if test
         if subset == 'train':
@@ -343,32 +484,34 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         elif subset == 'test':
             self.stim_idxs = list(range(1001, 1103))
 
-        if beta_type == 'impulse':
-            load_betas = self.load_boldmoments_betas_impulse
-        elif beta_type == 'raw':
-            load_betas = self.load_boldmoments_betas_raw
-        else:
-            raise ValueError(f'beta_type must be "impulse" or "raw", not {beta_type}')
-
         if not avg_reps and subset == 'train':
-            self.repeat_targets = 3
+            self.repeat_targets = self.BMD_TRAIN_REPS
         elif not avg_reps and subset == 'test':
-            self.repeat_targets = 10
+            self.repeat_targets = self.BMD_TEST_REPS
         elif avg_reps:
             self.repeat_targets = 1
         else:
             raise ValueError(f'Unknown subset')
 
+
+
         for sub in subs:
             if load_all_in_ram: # TODO FINISH THIS
+                if beta_type == 'impulse':
+                    load_all_betas_fn = self.load_all_boldmoments_betas_impulse
+                elif beta_type == 'raw':
+                    load_all_betas_fn = self.load_all_boldmoments_betas_raw
+                else:
+                    raise ValueError(f'beta_type must be "impulse" or "raw", not {beta_type}')
+
                 path_to_subject_data = os.path.join(betas_path, f'sub{sub:02d}')
                 
-                self.betas.extend(load_betas(path_to_subject_data, 
+                self.betas.extend(load_all_betas_fn(path_to_subject_data, 
                                                 rois=rois, 
                                                 avg_reps=avg_reps,
                                                 subset=subset))
 
-                self.targets.extend(self.load_target_vectors_boldmoments(targets_path, 
+                self.targets.extend(self.load_all_target_vectors_boldmoments(targets_path, 
                                                                 subset=subset,
                                                                 repeat_targets=self.repeat_targets))
             else:
@@ -408,9 +551,27 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         for roi in self.rois:
             roi_folder = roi+'_betas-GLMsingle_type-typed_z=1'
             beta_filename = self.betas_filenames[idx].replace('ROI_FOLDER_PLACEHOLDER', roi_folder)
-            betas.append( np.load(os.path.join(self.betas_path, 
-                                               beta_filename))
-            )
+            
+            if self.avg_reps:
+                # If npy file with average of reps exists, load it. Otherwise, average repetitions on the fly
+                if os.path.exists(os.path.join(self.betas_path, beta_filename)):
+                    betas.append( np.load(os.path.join(self.betas_path, 
+                                                    beta_filename))
+                    )
+                else: # Average repetitions on the fly
+                    rep=[]
+                    subs_reps = self.BMD_TRAIN_REPS if self.subset=='train' else self.BMD_TEST_REPS
+                    for r in range(subs_reps):
+                        rep.append( 
+                            np.load(os.path.join(self.betas_path, beta_filename[:-4]+f'_{r}.npy'))
+                        )
+                    avg_reps = np.mean(rep, axis=0)
+                    betas.append(avg_reps)
+
+            else:
+                betas.append( np.load(os.path.join(self.betas_path, 
+                                                beta_filename))
+                )
         return np.concatenate(betas) 
 
     def load_target(self, idx):
@@ -447,7 +608,9 @@ class BMDBetasAndTargetsDataset(data.Dataset):
 
         return targets_filenames
 
-    def load_boldmoments_betas_impulse(self,
+
+    ## Functions to load all in RAM
+    def load_all_boldmoments_betas_impulse(self,
                                        path_to_subject_data: str, 
                                         rois: list, 
                                         avg_reps: bool = True,
@@ -494,7 +657,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
 
         return betas_arr
 
-    def load_boldmoments_betas_raw(self,
+    def load_all_boldmoments_betas_raw(self,
                                    path_to_subject_data: str, 
                                    rois: list, 
                                    avg_reps: bool =True,
@@ -524,7 +687,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         return betas_arr
 
 
-    def load_target_vectors_boldmoments(self,
+    def load_all_target_vectors_boldmoments(self,
                                         path_to_target_vectors: str,
                                         subset: str = 'train', 
                                         repeat_targets=1) -> None:
@@ -547,6 +710,211 @@ class BMDBetasAndTargetsDataset(data.Dataset):
         
         return targets_arr
 
+
+### --------------- HAD Datasets
+    
+class HADVideoDataset(VideoDataset):
+    '''Dataset for HAD returning video stimuli.'''
+    
+    def get_video_paths(self, subset, metadata_path):
+        '''Returns list of video paths for a given subset'''
+        if subset == 'train':
+            video_paths = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
+        elif subset == 'test':
+            video_paths = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json')))
+        elif subset == 'all':
+            video_paths_train = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
+            video_paths_test = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json')))
+            video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+    
+        self.vid_paths = video_paths
+        return video_paths
+        
+
+class HADBetasAndTargetsDataset(data.Dataset):
+    '''Dataset for HAD data returning betas and targets.
+    
+    Can concatenate betas from multiple subjects and ROIs. 
+    Returns either train, test or both depending on the subset parameter
+    '''
+    
+    def __init__(self, 
+                 betas_path, 
+                 targets_path, 
+                 metadata_path = '../data/metadata_had',
+                 avg_reps=False, 
+                 beta_type='impulse',
+                 rois=['Group41'],
+                 subs=[1],
+                 subset='train',
+                 load_all_in_ram=False,
+                 use_noise_ceiling=True,
+                 return_filename=False,
+                 flatten_targets=True):
+        '''
+        Constructor for HADBetasAndTargetsDataset.
+               
+    
+        Args:
+            betas_path (str): path to HAD betas. 
+                This path should point to a folder containing subject subfolders called sub01, sub02, etc.
+            targets_path (str): path to target vectors, e.g. data/target_vectors_bmd/z_zeroscope
+            avg_train_reps (bool): whether to average over repetitions in training data
+            beta_type (str): 'impulse' or 'raw'
+            rois (list): list of ROIs to include
+            subs (list): list of subjects to include
+            subset (str): 'train', 'test' or 'both'
+            load_all_in_ram (bool): whether to load all data in RAM. If False, data will be loaded on the fly
+            use_noise_ceiling (bool): whether to multiply features by noise ceiling
+        '''
+        
+        self.betas = []
+        self.targets = []
+        self.betas_filenames = []
+        self.targets_filenames = []
+
+        self.betas_path = betas_path
+        self.targets_path = targets_path
+        self.avg_reps = avg_reps
+        self.beta_type = beta_type
+        self.rois = rois
+        self.subs = subs
+        self.subset = subset
+        self.load_all_in_ram = load_all_in_ram
+        self.use_noise_ceiling = use_noise_ceiling
+        self.return_filename = return_filename
+        self.flatten_targets = flatten_targets
+
+        if subset == 'train':
+            self.stim_names_to_use = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
+        elif subset == 'test':
+            self.stim_names_to_use = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json')))
+
+        for sub in subs:
+            if load_all_in_ram:
+                # TODO Finish
+                self.betas = self.load_all_had_betas()
+                self.targets = self.load_all_target_vectors_had()
+            else:
+                self.betas_filenames.extend( 
+                    self.gather_betas_impulse_filenames(sub)
+                )
+                self.targets_filenames.extend( 
+                    self.gather_target_filenames()
+                )
+        
+        
+    def __len__(self):
+        if self.load_all_in_ram:
+            return len(self.betas)
+        else:
+            return len(self.betas_filenames)
+    
+    def __getitem__(self, idx):
+            
+            if self.load_all_in_ram:
+                ret = (self.betas[idx], self.targets[idx])
+            
+            else:
+                beta = self.load_beta(idx)
+                target = self.load_target(idx)
+                ret = (beta, target)
+    
+            if self.return_filename:
+                ret = ret + (self.betas_filenames[idx], self.targets_filenames[idx])
+            
+            return ret
+
+    def load_beta(self, idx):
+        betas = []
+        for roi in self.rois:
+            roi_folder = roi+'_betas-GLMsingle_type-typeb_z=1'
+            beta_filename = self.betas_filenames[idx].replace('ROI_FOLDER_PLACEHOLDER', roi_folder)
+            
+            betas.append(np.load(os.path.join(self.betas_path, 
+                                            beta_filename))
+            )
+        return np.concatenate(betas)
+
+    def load_target(self, idx):
+        target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
+        if self.flatten_targets:
+            return target.reshape(-1)
+        return target
+
+    def gather_betas_filenames(self, sub: int) -> list:
+        '''
+        Gathers beta filenames for the HAD dataset. Requires self.stim_names_to_use to be defined.
+        self.stim_names_to_use must be a list of HAD video names to use in this dataset, 
+        typically a list of training videos or a list of test videos. Stim name example: v_Archery_id_9FFEroHG-fY_start_59.5_label_1
+        '''
+        betas_filenames = []
+        for s in self.stim_names_to_use: # Stim names to use must be a list of the HAD video names to use in this dataset, typically a list of training videos or a list of test videos. Stim name example: 'v_Archery_id_9FFEroHG-fY_start_59.5_label_1'
+            s = s.split('/')[-1].replace('.mp4', '.npy')
+            betas_filenames.append(
+                    os.path.join(f'sub{sub:02d}', 'indiv_npys', 'ROI_FOLDER_PLACEHOLDER', s)
+            )
+        return betas_filenames
+        
+
+    def gather_target_filenames(self):
+        targets_filenames = []
+        for s in self.stim_names_to_use:
+            targets_filenames.append(s)
+        return targets_filenames
+    
+
+    ## Functions to load all in RAM
+    def load_all_had_betas(self):
+        '''
+        Load all HAD betas in RAM. 
+        Returns a list of betas, where each element is an array of betas for a given subject and ROI.
+        '''
+        betas = []
+        raise NotImplementedError
+    
+
+    def load_all_target_vectors_had(self):
+        '''
+        Load all HAD target vectors in RAM. 
+        Returns a list of target vectors, where each element is a target vector for a given subject.
+        '''
+        targets = []
+        raise NotImplementedError
+
+
+### --------------- NOD Datasets
+
+class NODImageDataset(ImageDataset):
+    '''Dataset for NOD returning image stimuli.'''
+
+
+    def get_video_paths(self, subset, metadata_path):
+        '''Returns list of video paths for a given subset'''
+        if subset == 'train':
+            self.video_paths = json.load(open(os.path.join(metadata_path,'nod_train_set_video_paths.json')))
+        elif subset == 'test':
+            self.video_paths = json.load(open(os.path.join(metadata_path,'nod_test_set_video_paths.json')))
+        elif subset == 'all':
+            video_paths_train = json.load(open(os.path.join(metadata_path,'nod_train_set_video_paths.json')))
+            video_paths_test = json.load(open(os.path.join(metadata_path,'nod_test_set_video_paths.json')))
+            self.video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+
+class NODBetasAndTargetsDataset(data.Dataset):
+    pass
+
+
+### --------------- CC2017 Datasets
+
+class CC2017VideoDataset(data.Dataset):
+    pass
+
+class CC2017BetasAndTargetsDataset(data.Dataset):
+    pass
 
 
 ### ---- Datasets for Reconstruction
@@ -645,6 +1013,7 @@ class BMDReconstructionDataset():
             return True
         else:
             return False
+
 
 
 # class NSDReconstructionDataset():
