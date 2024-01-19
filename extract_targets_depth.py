@@ -1,12 +1,10 @@
-'''Extract BLIP embeddings for BOLDMoments videos'''
+"""Extract BLIP embeddings for BOLDMoments videos"""
 
 import argparse
 import os
 
 import cv2
-import numpy as np
 import torch
-from torchvision import transforms
 from tqdm import tqdm
 
 from utils import save_vectors_npy
@@ -14,14 +12,14 @@ from utils import save_vectors_npy
 
 def load_midas(model_type="DPT_Hybrid"):
     # Load the midas depth estimator
-    midas = torch.hub.load('intel-isl/MiDaS', model_type)
+    midas = torch.hub.load("intel-isl/MiDaS", model_type)
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     midas.to(device)
     midas.eval()
 
     print(f"Loaded model: {model_type} in {device}")
 
-    midas_transforms = torch.hub.load('intel-isl/MiDaS', 'transforms')
+    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     if model_type == "DPT_Large" or model_type == "DPT_Hybrid":
         transform = midas_transforms.dpt_transform
     else:
@@ -50,7 +48,7 @@ def main(args):
         device,
         args.path_to_video_frames,
         batch_size=8,
-        output_path=os.path.join(args.output_path, 'depth_unflattened'),
+        output_path=os.path.join(args.output_path, "depth_unflattened"),
     )
 
 
@@ -60,7 +58,7 @@ def get_and_save_depth_targets(
     device,
     path_to_video_frames,
     batch_size=None,
-    output_path='./data/target_vectors/depth',
+    output_path="./data/target_vectors/depth",
     flatten=False,
 ):
     n_frames_to_load = 15
@@ -92,7 +90,7 @@ def get_and_save_depth_targets(
                 # Try to load frame. If frame doesn't exist, use the last frame that was loadable
                 try:
                     frame_path = os.path.join(
-                        path_to_video_frames, frame_folder, f'{f*skip_frames+1:03d}.png'
+                        path_to_video_frames, frame_folder, f"{f*skip_frames+1:03d}.png"
                     )
                     frame = cv2.imread(frame_path)
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -128,11 +126,10 @@ def get_and_save_depth_targets(
             )
 
             prediction = prediction.squeeze().cpu().numpy()  # [96, 96]
-            prediction = (
-                255
-                * (prediction - prediction.min())
-                / (prediction.max() - prediction.min())
-            ).astype(np.uint8)
+            prediction = (prediction - prediction.min()) / (
+                prediction.max() - prediction.min()
+            )
+            prediction = (2 * prediction) - 1
 
             if flatten:
                 prediction = prediction.reshape(-1)
@@ -160,7 +157,7 @@ if __name__ == "__main__":
         "--output_path",
         required=False,
         type=str,
-        default='./data/target_vectors',
+        default="./data/target_vectors",
         help="Path to store the target vectors. Vectors will be stored in subfolder blip",
     )
 
@@ -168,7 +165,7 @@ if __name__ == "__main__":
         "--path_to_video_frames",
         required=False,
         type=str,
-        default='./data/stimuli/frames',
+        default="./data/stimuli/frames",
         help="Path to the videos for which to extract target vectors",
     )
 
