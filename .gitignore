@@ -19,6 +19,8 @@ data/viclip_embeddings_bmd/*
 data/viclip_embeddings_had/*
 data/viclip_embeddings_nsd/*
 data/nsd/*.tar
+data/stimuli_mp4/*
+data/target_vectors
 
 # mbm
 mbm_encoder/pretrained_model/*
