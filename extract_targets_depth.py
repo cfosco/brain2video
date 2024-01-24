@@ -48,7 +48,7 @@ def main(args):
         device,
         args.path_to_video_frames,
         batch_size=8,
-        output_path=os.path.join(args.output_path, "depth_unflattened"),
+        output_path=os.path.join(args.output_path, "depth_frames_unflattened"),
     )
 
 
@@ -57,14 +57,16 @@ def get_and_save_depth_targets(
     transform,
     device,
     path_to_video_frames,
+    num_frames: int = 8,
+    downsample_factor: float = 6,
+    frame_agg: str | None = None,
     batch_size=None,
     output_path="./data/target_vectors/depth",
     flatten=False,
 ):
-    n_frames_to_load = 15
     max_frame_number = 45
-    skip_frames = max_frame_number // n_frames_to_load
-    print(f"Loading {n_frames_to_load} frames per video")
+    skip_frames = max_frame_number // num_frames
+    print(f"Loading {num_frames} frames per video")
     n_videos = len(os.listdir(path_to_video_frames))
     video_folders = sorted(os.listdir(path_to_video_frames))
 
@@ -86,7 +88,7 @@ def get_and_save_depth_targets(
             video_folders[b * batch_size : (b + 1) * batch_size]
         ):
             frames = []
-            for f in range(n_frames_to_load):
+            for f in range(num_frames):
                 # Try to load frame. If frame doesn't exist, use the last frame that was loadable
                 try:
                     frame_path = os.path.join(
@@ -114,13 +116,14 @@ def get_and_save_depth_targets(
                 prediction = model(frames)
 
             # Average over frames
-            # [15, 384, 384] -> [384, 384]
-            prediction = torch.mean(prediction, dim=0)
+            # [num_frames, 384, 384] -> [384, 384]
+            if frame_agg == "mean":
+                prediction = torch.mean(prediction, dim=0, keepdim=True)
 
-            # downsample prediction by factor of 4
+            # downsample prediction by factor of downsample_factor
             prediction = torch.nn.functional.interpolate(
-                prediction[None].unsqueeze(0),
-                scale_factor=0.25,
+                prediction.unsqueeze(0),
+                scale_factor=1 / downsample_factor,
                 mode="bilinear",
                 align_corners=False,
             )
