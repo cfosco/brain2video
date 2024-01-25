@@ -24,14 +24,8 @@ def download_videos_bmd(
     os.system(f"tar -xzf {target_path}/stimuli_mp4.tar.gz -C {target_path}/stimuli_bmd")
 
 
-def download_videos_had(
-    target_path="./data",
-    csail_username="cfosco",
-):
-    path_to_videos = "/data/vision/oliva/datasets/HumanActionsDataset/stimuli/*"
-
-
 def download_videos_had(target_path="./data", csail_username="cfosco"):
+    path_to_videos = "/data/vision/oliva/datasets/HumanActionsDataset/stimuli/*"
     full_target_path = f"{target_path}/stimuli_had"
     os.makedirs(full_target_path, exist_ok=True)
 
@@ -71,8 +65,10 @@ def download_images_nod(target_path="./data", csail_username="cfosco"):
 
 ## BMD
 def download_betas_raw_bmd(
-    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+    target_path="./data", csail_username="cfosco", subjects_to_download=None
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     for subject in subjects_to_download:
         path_to_data = f"/data/vision/oliva/blahner/BOLDMoments/preprocessed_data/responses/sub{subject:02d}/testing"
 
@@ -88,8 +84,10 @@ def download_betas_raw_bmd(
 
 
 def download_betas_glmsingle_impulse_bmd(
-    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+    target_path="./data", csail_username="cfosco", subjects_to_download=None
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     for subject in subjects_to_download:
         path_to_data = f"/data/vision/oliva/datasets/BOLDMomentsGeneration/analysis/GLMMNI152_impulse/sub-{subject:02d}/GLMsingle/betas-prepared/prepared_allvoxel_pkl/"
 
@@ -105,8 +103,10 @@ def download_betas_glmsingle_impulse_bmd(
 
 
 def download_betas_cifti_bmd(
-    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+    target_path="./data", csail_username="cfosco", subjects_to_download=None
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     for subject in subjects_to_download:
         path_to_data = f"/data/vision/oliva/blahner/BMDGeneration/mindvis/data/BMD/cifti/task_videoGLM/sub-{subject:02d}/betas-prepared/prepared_allvoxel_pkl"
 
@@ -123,8 +123,10 @@ def download_betas_cifti_bmd(
 
 ## HAD
 def download_betas_cifti_had(
-    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+    target_path="./data", csail_username="cfosco", subjects_to_download=None
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     for subject in subjects_to_download:
         path_to_data = f"/data/vision/oliva/blahner/BMDGeneration/mindvis/data/HAD/cifti/task_videoGLM/sub-{subject:02d}/GLMsingle/betas-prepared/prepared_allvoxel_pkl"
 
@@ -141,8 +143,10 @@ def download_betas_cifti_had(
 
 ## NSD
 def download_betas_glmsingle_impulse_nsd(
-    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+    target_path="./data", csail_username="cfosco", subjects_to_download=None
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     # TODO finish this function
     raise NotImplementedError
 
