@@ -1,13 +1,26 @@
 """Extract BLIP embeddings for BOLDMoments videos"""
-
 import argparse
+import json
 import os
 
 import cv2
+import ffmpeg
+import imageio
+import numpy as np
 import torch
 from tqdm import tqdm
 
 from utils import save_vectors_npy
+
+
+def get_num_frames(video_path):
+    """Get number of frames in video"""
+    probe = ffmpeg.probe(video_path)
+
+    video_stream = next(
+        (stream for stream in probe["streams"] if stream["codec_type"] == "video"), None
+    )
+    return int(video_stream["nb_frames"])
 
 
 def load_midas(model_type="DPT_Hybrid"):
@@ -20,7 +33,7 @@ def load_midas(model_type="DPT_Hybrid"):
     print(f"Loaded model: {model_type} in {device}")
 
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-    if model_type == "DPT_Large" or model_type == "DPT_Hybrid":
+    if model_type in ["DPT_Large", "DPT_Hybrid"]:
         transform = midas_transforms.dpt_transform
     else:
         transform = midas_transforms.small_transform
@@ -42,14 +55,98 @@ def main(args):
     #         vit_feat = model.visual_encoder(img_arr).cpu().detach().numpy().squeeze()
     #     np.save(f'{savedir}/{s:06}.npy',vit_feat)
 
-    get_and_save_depth_targets(
+    # get_and_save_depth_targets(
+    #     midas,
+    #     transform,
+    #     device,
+    #     args.path_to_video_frames,
+    #     batch_size=8,
+    #     output_path=os.path.join(args.output_path, "depth_frames_unflattened"),
+    # )
+
+    data_root = "data/stimuli_had/"
+    output_root = "data/target_vectors/had_test_set_depth_frames"
+    metatdata_file = "./data/had_test_set_video_paths.json"
+    # output_root = "data/target_vectors/had_train_set_depth_frames"
+    # metatdata_file = "./data/had_train_set_video_paths.json"
+    get_and_save_depth_targets_from_video(
         midas,
         transform,
         device,
-        args.path_to_video_frames,
-        batch_size=8,
-        output_path=os.path.join(args.output_path, "depth_frames_unflattened"),
+        data_root,
+        output_root,
+        metadata_file=metatdata_file,
     )
+
+
+def get_and_save_depth_targets_from_video(
+    model,
+    transform,
+    device,
+    data_root,
+    output_root,
+    metadata_file,
+    num_frames: int = 8,
+    downsample_factor: float = 6,
+    frame_agg: str | None = None,
+    batch_size=None,
+    output_path="./data/target_vectors/depth",
+    flatten=False,
+):
+    with open(metadata_file, "r") as f:
+        metadata = json.load(f)
+
+    metadata = list(reversed(metadata))
+
+    total = len(metadata)
+    for path in tqdm(
+        metadata, desc="Extracting and saving depth targets...", total=total
+    ):
+        full_path = os.path.join(data_root, path)
+        reader = imageio.get_reader(full_path)
+        num_frames = len(reader)
+        num_frames = get_num_frames(full_path)
+        # get 8 frames
+        frame_inds = np.linspace(0, num_frames - 1, 8, dtype=int)
+        frames = []
+        for ind in frame_inds:
+            frame = reader.get_data(ind)
+            frame = transform(frame).to(device)
+            frames.append(frame)
+
+        frames = torch.cat(frames, dim=0).to(device)
+
+        with torch.no_grad():
+            prediction = model(frames)
+
+        if frame_agg == "mean":
+            # Average over frames
+            # [num_frames, 384, 384] -> [384, 384]
+            prediction = torch.mean(prediction, dim=0, keepdim=True)
+
+        # downsample prediction by factor of downsample_factor
+        prediction = torch.nn.functional.interpolate(
+            prediction.unsqueeze(0),
+            scale_factor=1 / downsample_factor,
+            mode="bilinear",
+            align_corners=False,
+        )
+
+        prediction = prediction.squeeze().cpu().numpy()  # [96, 96]
+        prediction = (prediction - prediction.min()) / (
+            prediction.max() - prediction.min()
+        )
+        prediction = (2 * prediction) - 1
+
+        if flatten:
+            prediction = prediction.reshape(-1)
+
+        # Save targets
+
+        save_path = os.path.join(output_root, path.replace(".mp4", ".npy"))
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        np.save(save_path, prediction)
+        # Save each target vector for each video as its own npy file
 
 
 def get_and_save_depth_targets(
