@@ -11,7 +11,11 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import ConcatDataset, DataLoader
 
-from dataset import BMDBetasAndTargetsDataset, NSDBetasAndTargetsDataset
+from dataset import (
+    BMDBetasAndTargetsDataset,
+    HADBetasAndTargetsDataset,
+    NSDBetasAndTargetsDataset,
+)
 from models import MLPRegressor, SwiGLURegressor
 from utils import compute_metrics
 
@@ -31,10 +35,7 @@ def main(args):
 
     backend = set_backend("numpy")  # or "torch_cuda"
 
-    if config.avg_train_reps:
-        repeat_train = 1
-    else:
-        repeat_train = 3
+    repeat_train = 1 if config.avg_train_reps else 3
 
     # Build method string
     method = f'regressor:{config.regressor}withscheduleronval-hidden:{config.hidden_size}-rois:{"-".join(config.roi)}-avgtrainreps:{config.avg_train_reps}-traindata:{config.train_on}'
@@ -233,7 +234,26 @@ def make_datasets(train_on, test_on, config):
         load_all_in_ram=False,
     )
 
-    dataset_makers = {"nsd": make_nsd_dataset, "bmd": make_bmd_dataset}
+    make_had_dataset = lambda x: HADBetasAndTargetsDataset(
+        betas_path=config.had_betas_path,
+        targets_path=os.path.join(config.had_targets_path, config.target),
+        metadata_path="./data/metadata_had",
+        avg_reps=False,
+        beta_type="impulse",
+        rois=config.roi,  # should basically be: ["Group41"]
+        subs=config.had_sub,
+        subset=x,
+        load_all_in_ram=False,
+        use_noise_ceiling=True,
+        return_filename=False,
+        flatten_targets=True,
+    )
+
+    dataset_makers = {
+        "bmd": make_bmd_dataset,
+        "had": make_had_dataset,
+        "nsd": make_nsd_dataset,
+    }
 
     train_datasets = []
     test_datasets = {}
@@ -607,6 +627,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--had_sub",
+        type=int,
+        default=[1],
+        nargs="*",
+        help="List of HAD subjects for which fMRI data will be used. Ints from 1 to 10.",
+    )
+
+    parser.add_argument(
         "--nsd_sub",
         type=int,
         default=[1],
@@ -640,6 +668,20 @@ if __name__ == "__main__":
         type=str,
         default="data/target_vectors_bmd",
         help="Path to BMD target vectors",
+    )
+
+    parser.add_argument(
+        "--had_betas_path",
+        type=str,
+        default="data/betas_impulse_had",
+        help="Path to had betas",
+    )
+
+    parser.add_argument(
+        "--had_targets_path",
+        type=str,
+        default="data/target_vectors_had",
+        help="Path to had target vectors",
     )
 
     parser.add_argument(
