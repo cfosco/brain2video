@@ -20,10 +20,16 @@ def main(args):
     pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w", torch_dtype=torch.float16)
     pipe.to(args.gpu)
 
+    # Print config of pipe
+    print(pipe.config)
+    
+    # Print config of text encoder
+    print(pipe.text_encoder.config)
+
     ## Load videos as tensors with shape (b f c h w)
     # We assume that we load BOLDMoments data, which has 45 frames per video and width and height of 268
     
-    print("Getting z targets")
+    # print("Getting z targets")
     ## Get z
     # get_and_save_z_targets(pipe, 
     #                        args.path_to_video_frames, 
@@ -32,20 +38,32 @@ def main(args):
 
 
 
-    get_and_save_z_targets_nsd(pipe, 
-                           args.nsd_path, 
-                           batch_size=80, 
-                           resolution=268, 
-                           output_path=os.path.join(args.output_path, 'z_zeroscope'))
+    # get_and_save_z_targets_nsd(pipe, 
+    #                        args.nsd_path, 
+    #                        batch_size=80, 
+    #                        resolution=268, 
+    #                        output_path=os.path.join(args.output_path, 'z_zeroscope'))
 
     # print("Getting c targets")
     ## Get c 
-    # get_and_save_c_targets(pipe, 
-    #                        args.path_to_annots, 
-    #                        batch_size=None, 
-    #                        output_path=os.path.join(args.output_path, 'c_zeroscope_unflattened'))
+    get_and_save_c_targets(pipe, 
+                           args.path_to_annots, 
+                           batch_size=None, 
+                           output_path=os.path.join(args.output_path, 'c_zeroscope'))
 
-    print(f"Saved target vectors to {args.output_path}")
+    # print(f"Saved target vectors to {args.output_path}")
+
+
+def get_and_save_z_targets_had():
+
+    dataset = HADVideoDataset(had_path='./data/stimuli_had',
+                              resolution=268,
+                              subset='train',
+                              return_names=True)
+
+    # Iterate over dataset and extract vectors
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+
 
 
 def get_and_save_z_targets_nsd(pipe, 
@@ -128,9 +146,9 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
 
 
 def get_and_save_c_targets(pipe, 
-                           path_to_annots='./data/annotations.json', 
+                           path_to_annots='./data/metadata_bmd/annotations.json', 
                            batch_size=None, 
-                           output_path='./data/target_vectors/c_zeroscope',
+                           output_path='./data/target_vectors_bmd/c_zeroscope',
                            average_captions=True):
 
     # Load annotations (default: BOLDMoments)
@@ -139,15 +157,34 @@ def get_and_save_c_targets(pipe,
     # Get conditioning vectors
     for video_name, a in tqdm(annots.items(), desc="Extracting conditioning vectors...", unit="video"):
         conditioning_vectors = prompts_to_conditioning_vectors(a['text_descriptions'], pipe)
+        # print("conditioning_vectors.shape", conditioning_vectors.shape) # [5, 77, 1024]
+
         # average conditioning vectors
         if average_captions:
             c = torch.mean(conditioning_vectors, dim=0, keepdim=True)
         else: # Choose first caption
             c = conditioning_vectors[0].unsqueeze(0) 
 
-        # save individual npy file
-        save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
 
+        print("c.shape", c.shape)
+
+        # save individual npy file
+        # save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
+
+def prompts_to_conditioning_vectors(prompts, pipe, return_flattened=False):
+    with torch.no_grad():
+        # Encode prompt returns the hidden_layer of the text encoder
+        cond_vectors = pipe._encode_prompt(
+                prompts,
+                "cuda:0",
+                num_images_per_prompt=1,
+                do_classifier_free_guidance=False,
+            )
+        
+        print("cond_vectors.shape", cond_vectors.shape)
+    if return_flattened:
+        return rearrange(cond_vectors, "b k l -> b (k l)")
+    return cond_vectors
 
 def images_to_latent_vectors(pixels, pipe, return_flattened=False):
 
@@ -177,7 +214,7 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattene
         0, pixels.shape[0], batch_size, desc="Encoding to latents...", 
         unit_scale=batch_size, unit="frame"
     ):  
-        
+        # TODO CHECK IF DIMENSIONALITY MATCHES WHAT ZEROSCOPE'S vae.encode EXPECTS
         pixels_batch = torch.tensor(pixels[idx : idx + batch_size]).to(pipe.device, dtype=torch.half)
         # print("pixels_batch generated. Shape:", pixels_batch.shape)
         # print_current_gpu_memory()
@@ -190,6 +227,7 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattene
     latents = torch.cat(latents)
 
     # Shape of latents: ((v 15) 4 33 33) -> (v 65340)
+
     if return_flattened:
         latents = rearrange(latents, "(v f) c h w -> v (f c h w)", v=nv, f=nf)
     else:
@@ -198,17 +236,6 @@ def videos_to_latent_vectors(pixels, pipe, batch_size: int = 60, return_flattene
     # print("latents.shape", latents.shape)
     return latents
 
-def prompts_to_conditioning_vectors(prompts, pipe, return_flattened=False):
-    with torch.no_grad():
-        cond_vectors = pipe._encode_prompt(
-                prompts,
-                "cuda:0",
-                num_images_per_prompt=1,
-                do_classifier_free_guidance=False,
-            )
-    if return_flattened:
-        return rearrange(cond_vectors, "b k l -> b (k l)")
-    return cond_vectors
 
 if __name__ == "__main__":
 
@@ -228,7 +255,7 @@ if __name__ == "__main__":
         "--path_to_video_frames",
         required=False,
         type=str,
-        default='./data/stimuli/frames',
+        default='./data/stimuli_bmd/frames',
         help="Path to the videos for which to extract target vectors",
     )
 
@@ -244,7 +271,7 @@ if __name__ == "__main__":
         "--path_to_annots",
         required=False,
         type=str,
-        default='./data/annotations.json',
+        default='./data/metadata_bmd/annotations.json',
         help="Path to the BOLDMoments annotations file",
     )
 

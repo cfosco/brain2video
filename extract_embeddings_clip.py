@@ -1,0 +1,204 @@
+import numpy as np
+import torch
+from transformers import pipeline, CLIPProcessor, CLIPModel, CLIPTextModel, CLIPVisionModel
+from PIL import Image
+import cv2
+import os
+import argparse
+from diffusers import DiffusionPipeline
+
+from dataset import *
+
+DATASET_MAP = {
+    'bmd': BMDVideoDataset,
+    'bmd_captions': BMDCaptionsDataset,
+    'had': HADVideoDataset,
+    'nsd': NSDImageDataset,
+    'nod': NODImageDataset,
+    'cc2017': CC2017VideoDataset,
+}
+
+DATASET_OUTPUT_TYPES = {
+    'bmd': 'video',
+    'bmd_captions': 'text',
+    'had': 'video',
+    'nsd': 'image',
+    'nod': 'image',
+    'cc2017': 'video',
+}
+
+DATASET_PATHS = {
+    'bmd': {'stimuli': './data/stimuli_bmd/mp4', 'metadata': './data/metadata_bmd'},
+    'bmd_captions': {'stimuli': './data/stimuli_bmd/captions', 'metadata': './data/metadata_bmd_captions'},
+    'had': {'stimuli':'./data/stimuli_had', 'metadata':'./data/metadata_had'},
+    'nsd': {'stimuli': './data/stimuli_nsd', 'metadata': './data/metadata_nsd'},
+    'nod': {'stimuli': './data/stimuli_nod', 'metadata': './data/metadata_nod'},
+    'cc2017': {'stimuli': './data/stimuli_cc2017', 'metadata': './data/metadata_cc2017'},
+}
+
+def main(args):
+
+    dataset = DATASET_MAP[args.dataset](
+                args.input_path if args.input_path is not None else DATASET_PATHS[args.dataset]['stimuli'], 
+                args.metadata_path if args.metadata_path is not None else DATASET_PATHS[args.dataset]['metadata'],
+                subset='all',
+                resolution=244,
+                transform=None,
+                normalize=False,
+                return_filename=True,
+                load_from_frames=args.load_from_frames)
+
+    dataloader = torch.utils.data.DataLoader(
+                dataset, 
+                batch_size=8, 
+                shuffle=False, 
+                num_workers=1)
+        
+    
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    if DATASET_OUTPUT_TYPES[args.dataset] == 'text':
+        get_emb = ZeroscopeTextEmbeddingPipeline(device)
+    elif DATASET_OUTPUT_TYPES[args.dataset] == 'image':
+        get_emb = ZeroscopeImageEmbeddingPipeline(device, args.caption_first)
+    elif DATASET_OUTPUT_TYPES[args.dataset] == 'video':
+        get_emb = ZeroscopeVideoEmbeddingPipeline(device, args.caption_first)
+
+
+    for stims, filenames in dataloader:
+        embeddings = get_emb(stims) 
+        for embedding, filename in zip(embeddings, filenames):
+            filename = filename.split('.')[0]
+            print("Saving embedding for", filename, "at", os.path.join(args.save_path, filename+'.npy'))
+            # save_embedding(os.path.join(args.save_path, filename+'.npy'), embedding)
+        
+
+
+class ZeroscopeTextEmbeddingPipeline():
+    def __init__(self, device="cuda"):
+        # TODO fix this, we're loading the full zeroscope model incl UNet just to use the _encode_prompt function
+        self.pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w")
+        self.pipe = self.pipe.to(device)
+        self.device = device
+
+    def __call__(self, caption_batch):
+        with torch.no_grad():
+            embeddings = self.pipe._encode_prompt(
+                            caption_batch,
+                            device=self.device,
+                            num_images_per_prompt=1,
+                            do_classifier_free_guidance=False,
+                            )
+        return embeddings
+    
+class ZeroscopeImageEmbeddingPipeline():
+    def __init__(self, device="cuda", caption_first=True):
+        self.device = device
+        self.caption_first = caption_first
+        if self.caption_first:
+            self.img_captioning_pipe = pipeline("image-to-text", 
+                                        model="Salesforce/blip-image-captioning-large",
+                                        device=self.device)
+            self.text_emb_pipe = ZeroscopeTextEmbeddingPipeline(device)
+        else:
+            self.pipe = CLIPVisionModel.from_pretrained("openai/clip-vit-large-patch14")
+    
+    def __call__(self, img_batch):
+        if self.caption_first:
+            caption_batch = self.img_captioning_pipe(img_batch)
+            caption_batch = [caption[0]['generated_text'] for caption in caption_batch]
+            embeddings = self.text_emb_pipe(caption_batch)
+        else:
+            with torch.no_grad():
+                embeddings = self.pipe(
+                                pixel_values=img_batch,
+                                device=self.device,
+                                return_tensors="pt",
+                                )
+                embeddings = self.pipe.model.encode_image(embeddings.pixel_values)
+        return embeddings
+    
+
+class ZeroscopeVideoEmbeddingPipeline():
+    def __init__(self, device="cuda", caption_first=True):
+        self.device = device
+        self.caption_first = caption_first
+        if self.caption_first:
+            self.vid_captioning_pipe = pipeline("image-to-text", 
+                                        model="kpyu/video-blip-flan-t5-xl-ego4d",
+                                        device=self.device)
+            self.text_emb_pipe = ZeroscopeTextEmbeddingPipeline(device)
+        else:
+            self.pipe = CLIPVisionModel.from_pretrained("openai/clip-vit-large-patch14")
+    
+
+    
+    def __call__(self, vid_batch):
+        if self.caption_first:
+            # Use the first frame of the video to get caption (TODO improve)
+            vid_batch = [Image.fromarray(frames[0].numpy()) for frames in vid_batch]
+            caption_batch = self.vid_captioning_pipe(vid_batch)
+            caption_batch = [caption[0]['generated_text'] for caption in caption_batch]
+
+            print("caption_batch", caption_batch)
+            print("caption_batch.shape", len(caption_batch))
+            print("caption_batch type", type(caption_batch))
+            
+            
+            embeddings = self.text_emb_pipe(caption_batch)
+            print("embeddings.shape", embeddings.shape)
+        else:
+            with torch.no_grad():
+                embeddings = self.pipe(
+                                text=vid_batch,
+                                device=self.device,
+                                return_tensors="pt",
+                                padding=True,
+                                truncation=True,
+                                max_length=77,
+                                )
+                embeddings = self.pipe.model.encode_text(embeddings.input_ids, embeddings.attention_mask)
+        return embeddings
+
+
+
+def save_embedding(path, embedding):
+    if not os.path.exists(os.path.dirname(path)):
+        os.makedirs(os.path.dirname(path))
+    np.save(path, embedding.cpu().numpy())
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', 
+                        '--dataset',
+                        type=str, 
+                        required=True,
+                        help='Dataset to extract embeddings from. One of bmd, bmd_captions, had, nsd, nod, cc2017')
+    parser.add_argument('-i',
+                        '--input_path', 
+                        type=str, 
+                        default=None, 
+                        help='Path to the stimuli. Can be folder of frame_folder or folder of videos.')
+    parser.add_argument('-m',
+                        '--metadata_path', 
+                        type=str, 
+                        default=None, 
+                        help='Path to the metadata.')
+    parser.add_argument('-s',
+                        '--save_path',
+                        type=str, 
+                        default='data/target_vectors_had/clip_text_enc_zeroscope', 
+                        help='Path to save the extracted embeddings.')
+    parser.add_argument('-c',
+                        '--caption_first',
+                        type=bool,
+                        default=True,
+                        help='Whether to caption the image/video first, then send that through the text_encoder to get the final embedding')
+    parser.add_argument('-f',
+                        '--load_from_frames',
+                        type=bool,
+                        default=False,
+                        help='Whether to load the video from frames (True) or from mp4 (False).')
+    args = parser.parse_args()
+
+    main(args)

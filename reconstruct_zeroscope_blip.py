@@ -242,7 +242,7 @@ if __name__ == "__main__":
         "--output_path",
         type=str,
         help="Output path for reconstructed videos",
-        default="./reconstructions/BMDgeneral_sub01_test2",
+        default="./reconstructions/BMDgeneral_sub01_test3",
     )
 
     parser.add_argument(

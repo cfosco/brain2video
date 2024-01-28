@@ -28,7 +28,10 @@ class VideoDataset(data.Dataset, abc.ABC):
                 transform=None,
                 normalize=True,
                 return_filename=False,
-                load_from_frames=False):
+                load_from_frames=False,
+                skip_frames=None,
+                n_frames_per_video=45,
+                ):
             '''
             Constructor for a generic VideoDataset.
                 
@@ -37,10 +40,17 @@ class VideoDataset(data.Dataset, abc.ABC):
                 path (str): path to videos. 
                     This path should point to a folder containing the videos/folders that will be listed in vid_paths.
                 metadata_path (str): path to HAD metadata
-                subset (str): 'train', 'test' or 'both'
+                subset (str): 'train', 'test' or 'all'
                 resolution (int): resolution to resize videos to
                 transform (torchvision.transforms): transforms to apply to videos
+                normalize (bool): whether to normalize and transpose videos to match typical pytorch formats. 
+                    Applies norm_and_transp() after loading image in uint8 (W,H,C). This fn puts the values in the [-1,1] range and transposes to ensure the dims are (C,W,H)
+                return_filename (bool): whether to return the filename of the video
+                load_from_frames (bool): whether to load videos frame by frame with cv2.imread instead of with cv2.VideoCapture. If True, path must point to a folder containing folders with the frames of each video.
+                skip_frames (int): How many frames to skip between each frame loaded. If None and n_frames_per_video is also None, all frames are loaded. If None and n_frames_per_video is not None, frames are loaded evenly spaced to get n_frames_per_video frames.
+                n_frames_per_video (int): How many frames to load per video. If None and skip_frames is also None, all frames are loaded. If None and skip_frames is not None, frames are loaded skipping skip_frames frames, and then padded with the last frame to get n_frames_per_video frames.
             '''
+
             
             self.path = path
             self.metadata_path = metadata_path
@@ -50,6 +60,8 @@ class VideoDataset(data.Dataset, abc.ABC):
             self.normalize = normalize
             self.return_filename = return_filename
             self.load_from_frames = load_from_frames
+            self.skip_frames = skip_frames
+            self.n_frames_per_video = n_frames_per_video
             
             if transform is not None:
                 self.transform = transform
@@ -74,41 +86,71 @@ class VideoDataset(data.Dataset, abc.ABC):
         
         if self.transform:
             video = self.transform(video)
-                
+        
+        if self.return_filename:
+            return video, self.vid_paths[idx]
         return video
 
-    def load_video(self, idx):
-        '''Loads videos with cv2.VideoCapture. 
-        Requires self.path to be a path to the folder containing whatever is in vid_paths.'''
 
+    def load_video(self, idx):
         video_path = os.path.join(self.path, self.vid_paths[idx])
         cap = cv2.VideoCapture(video_path)
 
         frames = []
-        while(cap.isOpened()):
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        frame_indices = self.determine_frame_indices(total_frames)
+
+        last_frame = None
+        for i in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
             ret, frame = cap.read()
             if ret:
-                frames.append(self.preprocess_frame(frame))
-            else:
-                break
+                last_frame = self.preprocess_frame(frame)
+                frames.append(last_frame)
+            elif last_frame is not None:
+                frames.append(last_frame)  # Repeat the last frame if needed
+
+        while len(frames) < self.n_frames_per_video:
+            frames.append(last_frame)  # Ensure we have n_frames_per_video frames
 
         cap.release()
-
         return np.array(frames)
 
     def load_frames(self, idx):
-        '''Loads videos frame by frame with cv2.imread and returns a numpy array of frames. 
-        Requires self.path to be a path to the folder containing whatever is in vid_paths,
-        and requires self.vid_paths to be partial paths to frame folders.'''
-        
         frames_path = os.path.join(self.path, self.vid_paths[idx])
-        frames = []
+        frame_files = sorted(os.listdir(frames_path))
+        total_frames = len(frame_files)
 
-        for f in sorted(os.listdir(frames_path)):
-            frame = cv2.imread(os.path.join(frames_path, f))
-            frames.append(self.preprocess_frame(frame))
-        
+        frame_indices = self.determine_frame_indices(total_frames)
+
+        last_frame = None
+        frames = []
+        for i in frame_indices:
+            if i < total_frames:
+                frame = self.preprocess_frame(cv2.imread(os.path.join(frames_path, frame_files[i])))
+                last_frame = frame
+            frames.append(last_frame)  # Repeat the last frame if needed
+
+        while len(frames) < self.n_frames_per_video:
+            frames.append(last_frame)  # Ensure we have n_frames_per_video frames
+
         return np.array(frames)
+
+    def determine_frame_indices(self, total_frames):
+
+        if self.n_frames_per_video is not None and self.skip_frames is not None:
+            frame_indices = range(0, total_frames, self.skip_frames)
+            frame_indices = list(frame_indices)[:self.n_frames_per_video]
+        elif self.n_frames_per_video is not None:
+            frame_indices = np.linspace(0, total_frames - 1, self.n_frames_per_video, dtype=int)
+        elif self.skip_frames is not None:
+            frame_indices = range(0, total_frames, self.skip_frames)
+        else:
+            frame_indices = range(total_frames)
+
+        return frame_indices
+
 
     def preprocess_frame(self, frame):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -118,6 +160,9 @@ class VideoDataset(data.Dataset, abc.ABC):
         return frame_rgb
 
 class ImageDataset(data.Dataset, abc.ABC):
+    pass
+
+class CaptionsDataset(data.Dataset, abc.ABC):
     pass
 
 ### --------------- NSD Datasets
@@ -431,17 +476,26 @@ class NSDBetasAndTargetsDataset(data.Dataset):
 class BMDVideoDataset(VideoDataset):
     '''Dataset for BMD returning video stimuli.'''
 
-    def get_video_paths(self, subset):
+    def get_video_paths(self, subset, metadata_path):
+        '''Returns list of video paths for a given subset'''
+
+        suffix=''
+        if not self.load_from_frames:
+            suffix='.mp4'
+
         if subset == 'train':
-            vid_paths = ['%04d.mp4' % i for i in range(1,1001)]
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1001)]
         elif subset == 'test':
-            vid_paths = ['%04d.mp4' % i for i in range(1001,1103)]
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1001,1103)]
         elif subset == 'all':
-            vid_paths = ['%04d.mp4' % i for i in range(1,1103)]
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1103)]
         else: 
             raise ValueError(f'Unknown subset {subset}')
 
         return vid_paths
+
+class BMDCaptionsDataset(CaptionsDataset):
+    pass
 
 class BMDBetasAndTargetsDataset(data.Dataset):
     """Dataset for BOLDMoments data returning betas and targets.
@@ -940,6 +994,8 @@ class NODImageDataset(ImageDataset):
         else:
             raise ValueError(f'Unknown subset {subset}')
 
+        return self.video_paths
+
 class NODBetasAndTargetsDataset(data.Dataset):
     pass
 
@@ -947,7 +1003,22 @@ class NODBetasAndTargetsDataset(data.Dataset):
 ### --------------- CC2017 Datasets
 
 class CC2017VideoDataset(data.Dataset):
-    pass
+    '''Dataset for CC2017 returning video stimuli.'''
+
+    def get_video_paths(self, subset, metadata_path):
+
+        if subset == 'train':
+            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+        elif subset == 'test':
+            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
+        elif subset == 'all':
+            self.video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+            self.video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
+            self.video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+            
+        return self.video_paths
 
 class CC2017BetasAndTargetsDataset(data.Dataset):
     pass

@@ -59,6 +59,18 @@ def download_images_nod(target_path="./data", csail_username="cfosco"):
         f"scp -r {csail_username}@vision30.csail.mit.edu:{path_to_images} {full_target_path}"
     )
 
+def download_videos_cc2017(target_path="./data", csail_username="cfosco"):
+    path_to_videos = "/data/vision/oliva/scratch/datasets/CC2017/video_fmri_dataset/stimuli/clipped2s/mp4/*"
+
+    full_target_path = f"{target_path}/stimuli_cc2017"
+    os.makedirs(full_target_path, exist_ok=True)
+
+    print("Downloading CC2017 videos")
+
+    # Download data with scp
+    os.system(
+        f"scp -r {csail_username}@vision30.csail.mit.edu:{path_to_videos} {full_target_path}"
+    )
 
 ### Betas Download Functions
 
@@ -155,6 +167,8 @@ def download_betas_glmsingle_impulse_nsd(
 def download_betas_cifti_nod(
     target_path="./data", csail_username="cfosco", subjects_to_download=[1]
 ):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
     for subject in subjects_to_download:
         path_to_data = f"/data/vision/oliva/scratch/datasets/NaturalObjectsDataset/derivatives/HCP_rois/sub-{subject:02d}/*"
 
@@ -171,16 +185,39 @@ def download_betas_cifti_nod(
         )
 
 
+# CC2017
+def download_betas_cifti_cc2017(
+    target_path="./data", csail_username="cfosco", subjects_to_download=[1]
+):
+    if subjects_to_download is None:
+        subjects_to_download = [1]
+    for subject in subjects_to_download:
+        path_to_data = f"/data/vision/oliva/scratch/datasets/CC2017/video_fmri_dataset/TSTrialEstimates/subject{subject}/estimates-prepared/prepared_allvoxel_pkl"
+
+        full_target_path = (
+            f"{target_path}/betas_cifti_cc2017/sub{subject:02d}"
+        )
+        os.makedirs(full_target_path, exist_ok=True)
+
+        print("Downloading betas_cifti_cc2017 for subject", subject)
+
+        # Download fmri data with scp
+        os.system(
+            f"scp -r {csail_username}@vision30.csail.mit.edu:{path_to_data} {full_target_path}"
+        )
+
 if __name__ == "__main__":
     AVAILABLE_DATA_TYPES = [
         "videos_bmd",
         "videos_had",
         "images_nod",
+        "videos_cc2017",
         "betas_raw_bmd",
         "betas_impulse_bmd",
         "betas_cifti_bmd",
         "betas_cifti_had",
         "betas_cifti_nod",
+        "betas_cifti_cc2017",
         # 'images_nsd',
         # 'betas_impulse_nsd',
     ]
@@ -228,6 +265,8 @@ if __name__ == "__main__":
         download_videos_had(args.target_path, args.csail_username)
     if args.data_type in ["images_nod", "all"]:
         download_images_nod(args.target_path, args.csail_username)
+    if args.data_type in ["videos_cc2017", "all"]:
+        download_videos_cc2017(args.target_path, args.csail_username)
     if args.data_type in ["betas_raw_bmd", "all"]:
         download_betas_raw_bmd(
             args.target_path, args.csail_username, args.subjects_to_download
@@ -246,6 +285,10 @@ if __name__ == "__main__":
         )
     if args.data_type in ["betas_cifti_nod", "all"]:
         download_betas_cifti_nod(
+            args.target_path, args.csail_username, args.subjects_to_download
+        )
+    if args.data_type in ["betas_cifti_cc2017", "all"]:
+        download_betas_cifti_cc2017(
             args.target_path, args.csail_username, args.subjects_to_download
         )
     # if args.data_type == 'betas_impulse_nsd' or args.data_type == 'all':

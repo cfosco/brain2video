@@ -2,12 +2,15 @@
 data/stimuli_bmd/*
 data/stimuli_had/*
 data/stimuli_nod/*
+data/stimuli_cc2017/*
 data/betas/*
 data/betas_nsd/*
 data/betas_raw_bmd/*
 data/betas_impulse_bmd/*
 data/target_vectors_bmd/*
 data/target_vectors_nsd/*
+data/target_vectors_had/*
+data/target_vectors_cc2017/*
 data/new_tsnes_from_ben_as_arr
 data/new_tsnes_from_ben_as_dict
 data/tsne_results
@@ -15,12 +18,15 @@ data/stimuli_had/*
 data/betas_cifti_had/*
 data/betas_cifti_bmd/*
 data/betas_cifti_nod/*
+data/betas_cifti_cc2017/*
 data/viclip_embeddings_bmd/*
 data/viclip_embeddings_had/*
 data/viclip_embeddings_nsd/*
+data/viclip_embeddings_cc2017/*
 data/nsd/*.tar
 data/stimuli_mp4/*
 data/target_vectors
+*.zip
 
 # mbm
 mbm_encoder/pretrained_model/*
