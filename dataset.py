@@ -645,7 +645,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
                         rep.append(
                             np.load(
                                 os.path.join(
-                                    self.betas_path, beta_filename[:-4] + f"_{r}.npy"
+                                    self.betas_path, beta_filename[:-4] + f"_rep{r}.npy"
                                 )
                             )
                         )
@@ -682,7 +682,7 @@ class BMDBetasAndTargetsDataset(data.Dataset):
                             f"sub{sub:02d}",
                             "indiv_npys",
                             "ROI_FOLDER_PLACEHOLDER",
-                            f"{i:04d}_{rep}.npy",
+                            f"{i:04d}_rep{rep}.npy",
                         )
                     )
         return betas_filenames
