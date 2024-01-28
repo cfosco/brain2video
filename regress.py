@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import os
 import pickle as pkl
 
@@ -11,7 +12,11 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import ConcatDataset, DataLoader
 
-from dataset import BMDBetasAndTargetsDataset, NSDBetasAndTargetsDataset
+from dataset import (
+    BMDBetasAndTargetsDataset,
+    HADBetasAndTargetsDataset,
+    NSDBetasAndTargetsDataset,
+)
 from models import MLPRegressor, SwiGLURegressor
 from utils import compute_metrics
 
@@ -31,13 +36,13 @@ def main(args):
 
     backend = set_backend("numpy")  # or "torch_cuda"
 
-    if config.avg_train_reps:
-        repeat_train = 1
-    else:
-        repeat_train = 3
+    repeat_train = 1 if config.avg_train_reps else 3
 
     # Build method string
-    method = f'regressor:{config.regressor}withscheduleronval-hidden:{config.hidden_size}-rois:{"-".join(config.roi)}-avgtrainreps:{config.avg_train_reps}-traindata:{config.train_on}'
+    method = (
+        f'regressor:{config.regressor}withscheduleronval-hidden:{config.hidden_size}-rois:'
+        f'{"-".join(config.roi)}-avgtrainreps:{config.avg_train_reps}-traindata:{config.train_on}'
+    )
     print("Method:", method)
 
     # Prepare training and testing datasets
@@ -153,9 +158,11 @@ def main(args):
     else:
         raise NotImplementedError(f"Regressor {config.regressor} not implemented")
 
-    ## Train model
+    # Train model
     print(
-        f"Training Regressor for {config.bmd_sub}. Input ROIs: {config.roi}. Target: {config.target}. Training data size: {len(dataset_train)}"
+        f"Training Regressor for {config.bmd_sub}. "
+        f"Input ROIs: {config.roi}. Target: {config.target}. "
+        f"Training data size: {len(dataset_train)}"
     )
 
     if config.regressor == "himalaya-ridge":
@@ -233,7 +240,26 @@ def make_datasets(train_on, test_on, config):
         load_all_in_ram=False,
     )
 
-    dataset_makers = {"nsd": make_nsd_dataset, "bmd": make_bmd_dataset}
+    make_had_dataset = lambda x: HADBetasAndTargetsDataset(
+        betas_path=config.had_betas_path,
+        targets_path=os.path.join(config.had_targets_path, config.target),
+        metadata_path="./data/metadata_had",
+        avg_reps=False,
+        beta_type="impulse",
+        rois=config.roi,  # should basically be: ["Group41"]
+        subs=config.had_sub,
+        subset=x,
+        load_all_in_ram=False,
+        use_noise_ceiling=True,
+        return_filename=False,
+        flatten_targets=True,
+    )
+
+    dataset_makers = {
+        "bmd": make_bmd_dataset,
+        "had": make_had_dataset,
+        "nsd": make_nsd_dataset,
+    }
 
     train_datasets = []
     test_datasets = {}
@@ -289,7 +315,8 @@ def eval_and_save(save_path, pipeline, datasets):
             all_preds.append(avg_preds)
             all_targets.append(
                 pt["targ"].reshape(-1)[None]
-            )  # Flatten targets to compute metrics (TODO: check that this reshape is correctly matching the flattening done in the dataset)
+            )  # Flatten targets to compute metrics
+            # (TODO: check that this reshape is correctly matching the flattening done in the dataset)
 
             # Save predicted vectors in their original shape
             avg_preds_unflattened = avg_preds.reshape(
@@ -311,19 +338,15 @@ def eval_and_save(save_path, pipeline, datasets):
 
 
 def to_numpy(arr):
-    try:
+    with contextlib.suppress(AttributeError):
         return maybe_move_to_host(arr).numpy()
-    except AttributeError:
-        pass
     return arr
 
 
 def maybe_move_to_host(arr):
     """Moves array to host if it's on GPU"""
-    try:
+    with contextlib.suppress(AttributeError):
         return arr.detach().cpu()
-    except AttributeError:
-        pass
     return arr
 
 
@@ -378,7 +401,7 @@ def train_model(
 ):
     model.train()
 
-    if optimizer == "adam" or optimizer == "adamw" or optimizer == None:
+    if optimizer == "adam" or optimizer == "adamw" or optimizer is None:
         opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=l2_lambda)
     elif optimizer == "sgd":
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=l2_lambda)
@@ -607,6 +630,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--had_sub",
+        type=int,
+        default=[1],
+        nargs="*",
+        help="List of HAD subjects for which fMRI data will be used. Ints from 1 to 10.",
+    )
+
+    parser.add_argument(
         "--nsd_sub",
         type=int,
         default=[1],
@@ -640,6 +671,20 @@ if __name__ == "__main__":
         type=str,
         default="data/target_vectors_bmd",
         help="Path to BMD target vectors",
+    )
+
+    parser.add_argument(
+        "--had_betas_path",
+        type=str,
+        default="data/betas_impulse_had",
+        help="Path to had betas",
+    )
+
+    parser.add_argument(
+        "--had_targets_path",
+        type=str,
+        default="data/target_vectors_had",
+        help="Path to had target vectors",
     )
 
     parser.add_argument(
