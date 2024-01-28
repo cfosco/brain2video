@@ -33,39 +33,39 @@ class VideoDataset(data.Dataset, abc.ABC):
                 skip_frames=None,
                 n_frames_per_video=45,
                 ):
-            '''
-            Constructor for a generic VideoDataset.
-                
-        
-            Args:
-                path (str): path to videos. 
-                    This path should point to a folder containing the videos/folders that will be listed in vid_paths.
-                metadata_path (str): path to HAD metadata
-                subset (str): 'train', 'test' or 'all'
-                resolution (int): resolution to resize videos to
-                transform (torchvision.transforms): transforms to apply to videos
-                normalize (bool): whether to normalize and transpose videos to match typical pytorch formats. 
-                    Applies norm_and_transp() after loading image in uint8 (W,H,C). This fn puts the values in the [-1,1] range and transposes to ensure the dims are (C,W,H)
-                return_filename (bool): whether to return the filename of the video
-                load_from_frames (bool): whether to load videos frame by frame with cv2.imread instead of with cv2.VideoCapture. If True, path must point to a folder containing folders with the frames of each video.
-                skip_frames (int): How many frames to skip between each frame loaded. If None and n_frames_per_video is also None, all frames are loaded. If None and n_frames_per_video is not None, frames are loaded evenly spaced to get n_frames_per_video frames.
-                n_frames_per_video (int): How many frames to load per video. If None and skip_frames is also None, all frames are loaded. If None and skip_frames is not None, frames are loaded skipping skip_frames frames, and then padded with the last frame to get n_frames_per_video frames.
-            '''
+        '''
+        Constructor for a generic VideoDataset.
+            
+    
+        Args:
+            path (str): path to videos. 
+                This path should point to a folder containing the videos/folders that will be listed in vid_paths.
+            metadata_path (str): path to HAD metadata
+            subset (str): 'train', 'test' or 'all'
+            resolution (int): resolution to resize videos to
+            transform (torchvision.transforms): transforms to apply to videos
+            normalize (bool): whether to normalize and transpose videos to match typical pytorch formats. 
+                Applies norm_and_transp() after loading image in uint8 (W,H,C). This fn puts the values in the [-1,1] range and transposes to ensure the dims are (C,W,H)
+            return_filename (bool): whether to return the filename of the video
+            load_from_frames (bool): whether to load videos frame by frame with cv2.imread instead of with cv2.VideoCapture. If True, path must point to a folder containing folders with the frames of each video.
+            skip_frames (int): How many frames to skip between each frame loaded. If None and n_frames_per_video is also None, all frames are loaded. If None and n_frames_per_video is not None, frames are loaded evenly spaced to get n_frames_per_video frames.
+            n_frames_per_video (int): How many frames to load per video. If None and skip_frames is also None, all frames are loaded. If None and skip_frames is not None, frames are loaded skipping skip_frames frames, and then padded with the last frame to get n_frames_per_video frames.
+        '''
 
-            
-            self.path = path
-            self.metadata_path = metadata_path
-            self.subset = subset
-            self.resolution = resolution
+        
+        self.path = path
+        self.metadata_path = metadata_path
+        self.subset = subset
+        self.resolution = resolution
+        self.transform = transform
+        self.normalize = normalize
+        self.return_filename = return_filename
+        self.load_from_frames = load_from_frames
+        self.skip_frames = skip_frames
+        self.n_frames_per_video = n_frames_per_video
+        
+        if transform is not None:
             self.transform = transform
-            self.normalize = normalize
-            self.return_filename = return_filename
-            self.load_from_frames = load_from_frames
-            self.skip_frames = skip_frames
-            self.n_frames_per_video = n_frames_per_video
-            
-            if transform is not None:
-                self.transform = transform
 
         self.vid_paths = self.get_video_paths(subset, metadata_path)
 
