@@ -13,89 +13,143 @@ from tqdm import trange, tqdm
 from utils import save_vectors_npy
 from torch.utils.data import DataLoader
 from dataset import NSDImageDataset
+from dataset import CC2017VideoDataset
 
-def main(args):
 
-    ## Load stuff needed for zeroscope
-    pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w", torch_dtype=torch.float16)
-    pipe.to(args.gpu)
+from dataset import *
 
-    # Print config of pipe
-    print(pipe.config)
+
+def main(args):  
+
+    # Build dataset and dataloader
+    dataset = DATASET_MAP[args.dataset](
+                args.input_path if args.input_path is not None else DATASET_PATHS[args.dataset]['stimuli'], 
+                args.metadata_path if args.metadata_path is not None else DATASET_PATHS[args.dataset]['metadata'],
+                subset='all',
+                resolution=268,
+                transform=None,
+                normalize=True,
+                return_filename=True,
+                load_from_frames=args.load_from_frames,
+                skip_frames=None,
+                n_frames_per_video=15)
+
     
-    # Print config of text encoder
-    print(pipe.text_encoder.config)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0) # will return batches as pytorch tensors
+        
+    if args.device is None:
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
 
-    ## Load videos as tensors with shape (b f c h w)
-    # We assume that we load BOLDMoments data, which has 45 frames per video and width and height of 268
-    
-    # print("Getting z targets")
-    ## Get z
-    # get_and_save_z_targets(pipe, 
-    #                        args.path_to_video_frames, 
-    #                        batch_size=8, 
-    #                        output_path=os.path.join(args.output_path, 'z_zeroscope_unflattened'))
+    # Instantiate pipeline
+    latent_pipeline = ZeroscopeLatentEmbeddingPipeline(device=device,
+                                                        return_flattened=False)
 
+    # Define save path
+    if args.save_path is None:
+        args.save_path = f'./data/target_vectors_{args.dataset}/z_zeroscope'
 
+    # Extract and save z targets
+    for batch, filenames in tqdm(dataloader, desc=f"Extracting z vectors for {args.dataset}...", unit="batch"):    
 
-    # get_and_save_z_targets_nsd(pipe, 
-    #                        args.nsd_path, 
-    #                        batch_size=80, 
-    #                        resolution=268, 
-    #                        output_path=os.path.join(args.output_path, 'z_zeroscope'))
+        # print("batch.shape", batch.shape)
+        batch_of_zs = latent_pipeline(batch) 
 
-    # print("Getting c targets")
-    ## Get c 
-    get_and_save_c_targets(pipe, 
-                           args.path_to_annots, 
-                           batch_size=None, 
-                           output_path=os.path.join(args.output_path, 'c_zeroscope'))
-
-    # print(f"Saved target vectors to {args.output_path}")
-
-
-def get_and_save_z_targets_had():
-
-    dataset = HADVideoDataset(had_path='./data/stimuli_had',
-                              resolution=268,
-                              subset='train',
-                              return_names=True)
-
-    # Iterate over dataset and extract vectors
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
-
-
-
-def get_and_save_z_targets_nsd(pipe, 
-                               nsd_path = '../StableDiffusionReconstruction/nsd',
-                               idxs = list(range(0,73000)),
-                               batch_size=None,
-                               resolution=268,
-                               output_path='./data/target_vectors_nsd/z_zeroscope',):
-    
-    # Instantiate Dataset
-    dataset = NSDImageDataset(idxs = idxs, 
-                              nsd_path=nsd_path,
-                              resolution=resolution)
-
-    names = [f'{idx:06d}' for idx in idxs]
-
-    # Iterate over dataset and extract vectors
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-
-    for i, batch in enumerate(tqdm(dataloader, desc="Extracting and saving z vectors...", unit="batch")):
-
-        # Get latent embedding targets
-        batch_of_zs = images_to_latent_vectors(batch, pipe, return_flattened=False)
-
+        # print("names of vids in batch:",filenames)
         # print("batch_of_zs.shape", batch_of_zs.shape)
-
+        
         # Save targets
-        save_vectors_npy(batch_of_zs, output_path, names[i*batch_size:(i+1)*batch_size])
+        save_vectors_npy(batch_of_zs, args.save_path, filenames)   
+        
+
+
+
+class ZeroscopeLatentEmbeddingPipeline():
+    def __init__(self, device="cuda", return_flattened=False):
+        self.pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w", torch_dtype=torch.float16)
+        self.pipe = self.pipe.to(device)
+        self.device = device
+        self.return_flattened = return_flattened
+
+    def __call__(self, video_batch):
+
+        # Make into pytorch tensor if necessary and send to device
+        if not isinstance(video_batch, torch.Tensor):
+            video_batch = torch.tensor(video_batch)
+        video_batch = video_batch.half().to(self.pipe.device)
+
+        nf = video_batch.shape[1]
+        nb = video_batch.shape[0]
+        pixels_batch = rearrange(video_batch, "b f c h w -> (b f) c h w")
+
+
+        # TODO CHECK IF DIMENSIONALITY MATCHES WHAT ZEROSCOPE'S vae.encode EXPECTS
+        with torch.no_grad():
+            latents_batch = self.pipe.vae.encode(pixels_batch).latent_dist.sample()
+
+        latents_batch = latents_batch.mul(self.pipe.vae.config.scaling_factor).detach().cpu()
+
+        if self.return_flattened: # Shape of latents: ((v 15) 4 33 33) -> (v 65340)
+            latents_batch = rearrange(latents_batch, "(b f) c h w -> b (f c h w)", b=nb, f=nf)
+        else:
+            latents_batch = rearrange(latents_batch, "(b f) c h w -> b f c h w", b=nb, f=nf)
+        
+        return latents_batch
+
+
+
+
+### ------ DEPRECATED FUNCTIONS
+
+def get_and_save_z_targets(dataset,
+                            path='./data/stimuli_cc2017',
+                            batch_size=1,
+                            resolution=268,
+                            output_path='./data/target_vectors_cc2017/z_zeroscope'
+                            ):
+
+        dataset = CC2017VideoDataset( 
+                            path, 
+                            metadata_path='./data/metadata_cc2017',
+                            subset='all',
+                            resolution=resolution,
+                            transform=None,
+                            normalize=True,
+                            return_filename=True,
+                            load_from_frames=False,
+                            skip_frames=None,
+                            n_frames_per_video=15,
+        )
+
+
+        # Iterate over dataset and extract vectors
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0) # will return batches as pytorch tensors
+
+
+
+
+        latent_pipeline = ZeroscopeLatentEmbeddingPipeline(device="cuda",
+                                                            return_flattened=False)
     
+        for i, (batch, filenames) in tqdm(enumerate(dataloader), desc="Extracting z vectors for CC2017...", unit="batch"):    
+            # Get latent embedding targets
+            # print("batch.shape", batch.shape)
+
+            # transform batch to torch tensor and send to device
+            batch_of_zs = latent_pipeline(batch) 
+
+            # print("names of vids in batch:",filenames)
+            # print("batch_of_zs.shape", batch_of_zs.shape)
+            
+    
+            # Save targets
+            save_vectors_npy(batch_of_zs, output_path, filenames)
+            
     
 
-def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_path='./data/target_vectors/z_zeroscope'):
+
+def get_and_save_z_targets_bmd(pipe, path_to_video_frames, batch_size=None, output_path='./data/target_vectors/z_zeroscope'):
 
     n_frames_to_load = 15
     max_frame_number = 45
@@ -145,7 +199,50 @@ def get_and_save_z_targets(pipe, path_to_video_frames, batch_size=None, output_p
         save_vectors_npy(batch_of_zs, output_path, video_names)
 
 
-def get_and_save_c_targets(pipe, 
+
+
+def get_and_save_z_targets_had():
+
+    dataset = HADVideoDataset(had_path='./data/stimuli_had',
+                              resolution=268,
+                              subset='train',
+                              return_names=True)
+
+    # Iterate over dataset and extract vectors
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+
+
+
+def get_and_save_z_targets_nsd(pipe, 
+                               nsd_path = '../StableDiffusionReconstruction/nsd',
+                               idxs = list(range(0,73000)),
+                               batch_size=None,
+                               resolution=268,
+                               output_path='./data/target_vectors_nsd/z_zeroscope',):
+    
+    # Instantiate Dataset
+    dataset = NSDImageDataset(idxs = idxs, 
+                              nsd_path=nsd_path,
+                              resolution=resolution)
+
+    names = [f'{idx:06d}' for idx in idxs]
+
+    # Iterate over dataset and extract vectors
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+
+    for i, batch in enumerate(tqdm(dataloader, desc="Extracting and saving z vectors...", unit="batch")):
+
+        # Get latent embedding targets
+        batch_of_zs = images_to_latent_vectors(batch, pipe, return_flattened=False)
+
+        # print("batch_of_zs.shape", batch_of_zs.shape)
+
+        # Save targets
+        save_vectors_npy(batch_of_zs, output_path, names[i*batch_size:(i+1)*batch_size])
+
+
+
+def get_and_save_c_targets_bmd(pipe, 
                            path_to_annots='./data/metadata_bmd/annotations.json', 
                            batch_size=None, 
                            output_path='./data/target_vectors_bmd/c_zeroscope',
@@ -170,6 +267,7 @@ def get_and_save_c_targets(pipe,
 
         # save individual npy file
         # save_vectors_npy(c.cpu().numpy(), output_path, [video_name])
+
 
 def prompts_to_conditioning_vectors(prompts, pipe, return_flattened=False):
     with torch.no_grad():
@@ -242,55 +340,56 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--extract_for_idx",
-        required=False,
-        default=None,
-        nargs="*",
-        type=int,
-        help="Start and end idx of the videos for which to extract target vectors",
-    )
+    parser.add_argument("-idxs",
+                        "--extract_for_idx",
+                        required=False,
+                        default=None,
+                        nargs="*",
+                        type=int,
+                        help="Start and end idx of the videos for which to extract target vectors")
 
-    parser.add_argument(
-        "--path_to_video_frames",
-        required=False,
-        type=str,
-        default='./data/stimuli_bmd/frames',
-        help="Path to the videos for which to extract target vectors",
-    )
+    parser.add_argument('-d', 
+                        '--dataset',
+                        type=str, 
+                        required=True,
+                        help='Dataset to extract embeddings from. One of bmd, bmd_captions, had, nsd, nod, cc2017')
 
-    parser.add_argument(
-        "--nsd_path",
-        required=False,
-        type=str,
-        default='../StableDiffusionReconstruction/nsd',
-        help="Path to the NSD dataset",
-    )
+    parser.add_argument('-i',
+                        '--input_path', 
+                        type=str, 
+                        default=None, 
+                        help='Path to the stimuli. Can be folder of frame_folder or folder of videos.')
 
-    parser.add_argument(
-        "--path_to_annots",
-        required=False,
-        type=str,
-        default='./data/metadata_bmd/annotations.json',
-        help="Path to the BOLDMoments annotations file",
-    )
+    parser.add_argument('-m',
+                        '--metadata_path', 
+                        type=str, 
+                        default=None, 
+                        help='Path to the metadata.')
 
-    parser.add_argument(
-        "--output_path",
-        required=False,
-        type=str,
-        default='./data/target_vectors',
-        help="Path to store the target vectors. Vectors will be stored in subfolders z_zeroscope and c_zeroscope",
-    )
+    parser.add_argument('-s',
+                        '--save_path',
+                        type=str, 
+                        default=None, 
+                        help='Path to save the extracted embeddings.')
 
-    parser.add_argument(
-        "--gpu",
-        required=False,
-        type=str,
-        default='cuda:0',
-        help="GPU to use for extracting target vectors",
-    )
+    parser.add_argument('-f',
+                        '--load_from_frames',
+                        type=bool,
+                        default=False,
+                        help='Whether to load the video from frames (True) or from mp4 (False).')
 
+    parser.add_argument('-dev',
+                        '--device',
+                        type=str,
+                        default="cuda:0",
+                        help='Device to run the model on.')
+    
+    parser.add_argument('-b',
+                        '--batch_size',
+                        type=int,
+                        default=8,
+                        help='Batch size for the dataloader.')
+    
     args = parser.parse_args()
 
     main(args)

@@ -1,0 +1,40 @@
+
+target: blip
+
+train_on:
+  - cc2017
+
+test_on:
+  - cc2017
+  - bmd
+
+
+rois:
+- Group41
+
+subs:
+- 1
+- 2
+
+avg_train_reps: False
+bundle_reps: False
+batch_size: 512
+regressor: swiglu
+
+mlp:
+  hidden_size: 2048
+
+swiglu:
+  hidden_size: 2048
+
+
+
+
+training_hyperparameters:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 100
+  patience: 10
+  min_delta: 0.001
+  loss: binary_crossentropy
+  optimizer: adam

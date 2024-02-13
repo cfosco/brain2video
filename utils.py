@@ -316,7 +316,10 @@ def save_vectors_npy(vectors, save_path, filenames):
 
     # Save each target vector for each video as its own npy file
     for i in ran:
-        np.save(os.path.join(save_path, f"{filenames[i]}.npy"), vectors[i])
+        fi = os.path.splitext(filenames[i])[0]
+        name = os.path.join(save_path, f"{fi}.npy")
+        os.makedirs(os.path.dirname(name), exist_ok=True)
+        np.save(os.path.join(save_path, f"{fi}.npy"), vectors[i])
 
 
 def print_current_gpu_memory():
@@ -331,9 +334,11 @@ def print_current_gpu_memory():
 
 
 
-def norm_and_transp(img):
-    return (np.array(img).transpose(2, 0, 1) / 255.0 ) * 2.0 - 1.0
-
+def norm_and_transp(img, minus_1_to_1=True):
+    if minus_1_to_1:
+        return (np.array(img).transpose(2, 0, 1) / 255.0) * 2.0 - 1.0
+    else:
+        return np.array(img).transpose(2, 0, 1) / 255.0
 
 
 

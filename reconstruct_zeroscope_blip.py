@@ -11,7 +11,7 @@ from diffusers import VideoToVideoSDPipeline, DPMSolverMultistepScheduler
 from einops import rearrange
 from utils import vid_to_gif, frames_to_vid
 import sys
-from dataset import BMDReconstructionDataset
+from dataset import *
 
 sys.path.append("./blip/models")
 from blip import blip_decoder
@@ -35,14 +35,15 @@ def main(args):
     blip_deco = blip_deco.to("cuda")
 
     if args.use_gt_vecs or args.use_gt_z:
-        args.z_path = "./data/target_vectors/z_zeroscope"
+        args.z_path = f"./data/target_vectors_{args.dataset}/z_zeroscope"
     if args.use_gt_vecs or args.use_gt_blip:
-        args.blip_path = "./data/target_vectors/blip"
+        args.blip_path = f"./data/target_vectors_{args.dataset}/blip"
 
-    z_blip_dataset = BMDReconstructionDataset(
-        {"z": args.z_path, "blip": args.blip_path},
-        args.set,
-        rearrange_funcs={
+    z_blip_dataset = ReconstructionDataset(
+        cond_vectors_paths_dict = {"z": args.z_path, "blip": args.blip_path},
+        metadata_path = DATASET_PATHS[args.dataset]['metadata'],
+        subset = args.set,
+        rearrange_funcs = {
             "z": lambda z: rearrange(z, '(f c w h) -> c f w h', f=15, c=4, w=33, h=33),
             "blip": lambda bl: rearrange(bl, '(k l) -> k l', k=226, l=768)
         },
@@ -100,7 +101,21 @@ def main(args):
     # captions = []
 
     # for i in range(len(z)):
+
+    k=0
     for z, blip_emb, filename in z_blip_dataset:
+
+        # DEBUG
+        if k%7==0:
+            z2 = z_blip_dataset[np.random.randint(len(z_blip_dataset))][0]
+            # blip_emb2 = z_blip_dataset[np.random.randint(len(z_blip_dataset))][1]
+        k+=1
+        a = np.random.randn()*0.5 + 0.5
+        z = z*(1-a)+z2*a + torch.tensor(np.random.randn(4, 15, 33, 33)).float() * 0.9 #+ torch.tensor(np.random.randn()).float()
+        blip_emb = blip_emb  + torch.tensor(np.random.randn(226, 768)).float() * 0.5 #+ blip_emb2*a
+
+
+
         z = z.cuda()
         blip_emb = blip_emb.cuda()
         filename = filename.split(".")[0]
@@ -111,11 +126,14 @@ def main(args):
             blip_deco,
             device="cuda",
             image_embeds=blip_emb[None],
-            num_beams=4,
+            num_beams=1,
             max_length=20,
             min_length=4,
             repetition_penalty=6.0,
         )
+
+        # Clean caption: remove slashes and replace with spaces
+        caption = [c.replace("/", " ") for c in caption]
 
         print("Generated caption for video", filename, ":", caption)
 
@@ -131,8 +149,8 @@ def main(args):
         rec_vid_frames = pipe(
             prompt=caption,
             video=z[None] * args.latent_factor,
-            num_inference_steps=50,
-            strength=0.5,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
+            num_inference_steps=20,
+            strength=0.8,  # Strength controls the noise applied to the latent before starting the diffusion process. Higher strength = higher noise. Acts as a % of inference steps
         ).frames
 
         print(
@@ -225,6 +243,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--dataset",
+        type=str,
+        help="Dataset to reconstruct videos from. Options: bmd, bmd_captions, had, nsd, nod, cc2017",
+        
+    )
+
+    parser.add_argument(
         "--z_path",
         type=str,
         help="Path to predicted latents npy file",
@@ -242,7 +267,7 @@ if __name__ == "__main__":
         "--output_path",
         type=str,
         help="Output path for reconstructed videos",
-        default="./reconstructions/BMDgeneral_sub01_test3",
+        default="./reconstructions/cc2017_regressor:mlpwithscheduler_rois:Group41_testSub01_trainAllSub_feats:z_zeroscope_blip_strength:0.8",
     )
 
     parser.add_argument(
@@ -274,7 +299,7 @@ if __name__ == "__main__":
         "--latent_factor",
         type=float,
         help="Factor to scale the predicted latents by",
-        default=3.0,
+        default=1.0,
     )
 
     args = parser.parse_args()

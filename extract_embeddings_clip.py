@@ -8,33 +8,7 @@ import argparse
 from diffusers import DiffusionPipeline
 
 from dataset import *
-
-DATASET_MAP = {
-    'bmd': BMDVideoDataset,
-    'bmd_captions': BMDCaptionsDataset,
-    'had': HADVideoDataset,
-    'nsd': NSDImageDataset,
-    'nod': NODImageDataset,
-    'cc2017': CC2017VideoDataset,
-}
-
-DATASET_OUTPUT_TYPES = {
-    'bmd': 'video',
-    'bmd_captions': 'text',
-    'had': 'video',
-    'nsd': 'image',
-    'nod': 'image',
-    'cc2017': 'video',
-}
-
-DATASET_PATHS = {
-    'bmd': {'stimuli': './data/stimuli_bmd/mp4', 'metadata': './data/metadata_bmd'},
-    'bmd_captions': {'stimuli': './data/stimuli_bmd/captions', 'metadata': './data/metadata_bmd_captions'},
-    'had': {'stimuli':'./data/stimuli_had', 'metadata':'./data/metadata_had'},
-    'nsd': {'stimuli': './data/stimuli_nsd', 'metadata': './data/metadata_nsd'},
-    'nod': {'stimuli': './data/stimuli_nod', 'metadata': './data/metadata_nod'},
-    'cc2017': {'stimuli': './data/stimuli_cc2017', 'metadata': './data/metadata_cc2017'},
-}
+from dataset import DATASET_MAP, DATASET_OUTPUT_TYPES, DATASET_PATHS
 
 def main(args):
 
@@ -46,7 +20,9 @@ def main(args):
                 transform=None,
                 normalize=False,
                 return_filename=True,
-                load_from_frames=args.load_from_frames)
+                load_from_frames=args.load_from_frames,
+                skip_frames=None,
+                n_frames_per_video=8)
 
     dataloader = torch.utils.data.DataLoader(
                 dataset, 
@@ -54,8 +30,10 @@ def main(args):
                 shuffle=False, 
                 num_workers=1)
         
-    
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if args.device is None:
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
 
     if DATASET_OUTPUT_TYPES[args.dataset] == 'text':
         get_emb = ZeroscopeTextEmbeddingPipeline(device)
@@ -64,13 +42,16 @@ def main(args):
     elif DATASET_OUTPUT_TYPES[args.dataset] == 'video':
         get_emb = ZeroscopeVideoEmbeddingPipeline(device, args.caption_first)
 
+    if args.save_path is None:
+        args.save_path = os.path.join(f'./data/target_vectors_{args.dataset}/clip_text_enc_zeroscope', args.dataset)
 
     for stims, filenames in dataloader:
+        print("Processing filenames:", filenames)
         embeddings = get_emb(stims) 
         for embedding, filename in zip(embeddings, filenames):
-            filename = filename.split('.')[0]
+            filename = os.path.splitext(filename)[0]
             print("Saving embedding for", filename, "at", os.path.join(args.save_path, filename+'.npy'))
-            # save_embedding(os.path.join(args.save_path, filename+'.npy'), embedding)
+            save_embedding(os.path.join(args.save_path, filename+'.npy'), embedding)
         
 
 
@@ -187,7 +168,7 @@ if __name__ == '__main__':
     parser.add_argument('-s',
                         '--save_path',
                         type=str, 
-                        default='data/target_vectors_had/clip_text_enc_zeroscope', 
+                        default=None, 
                         help='Path to save the extracted embeddings.')
     parser.add_argument('-c',
                         '--caption_first',
@@ -199,6 +180,10 @@ if __name__ == '__main__':
                         type=bool,
                         default=False,
                         help='Whether to load the video from frames (True) or from mp4 (False).')
+    parser.add_argument('--device',
+                        type=str,
+                        default="cuda:0",
+                        help='Device to run the model on.')
     args = parser.parse_args()
 
     main(args)
