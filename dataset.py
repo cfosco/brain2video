@@ -229,7 +229,7 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
             flatten_targets (bool): whether to flatten target vectors
         """
 
-        assert(~(subset is 'all' and bundle_reps is True and avg_reps is False), 'Cannot returned bundled repetitions when subset is all because of the different number of reps between train and test')
+        assert ~(subset=='all' and bundle_reps==True and avg_reps==False), 'Cannot returned bundled repetitions when subset is all because of the different number of reps between train and test'
 
         self.betas = []
         self.targets = []
@@ -1608,7 +1608,7 @@ class CC2017ReconstructionDataset(data.Dataset):
 ### -------------- Maps
 
 # TODO transform into config files for each dataset, to make it easy to add a new one
-VIDEO_DATASET_MAP = {
+STIM_DATASET_MAP = {
     'bmd': BMDVideoDataset,
     'bmd_captions': BMDCaptionsDataset,
     'had': HADVideoDataset,
