@@ -254,6 +254,8 @@ class SVDVideoEmbeddingPipeline:
                 num_videos_per_prompt=1,
                 do_classifier_free_guidance=False,
             )
+            # embeddings are [N, 1, 1024]
+            embeddings = embeddings[:, 0]
 
         return embeddings
 
