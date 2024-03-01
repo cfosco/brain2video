@@ -1,3 +1,5 @@
+# TODO: DEPRECATE AND MOVE LOGIC TO extract_embeddings.py
+
 import sys
 sys.path.append('../')
 sys.path.append('../ViCLIP')

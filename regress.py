@@ -267,6 +267,9 @@ def eval_and_save_estimated_vectors(save_path, pipeline, datasets, use_dataloade
             avg_preds_unflattened = avg_preds.reshape(
                 pt["targ"].shape
             )  # TODO: Check that this reshaping reshapes in the right way
+
+            avg_preds_unflattened = avg_preds_unflattened.cpu().numpy()
+
             np.save(
                 os.path.join(save_path, target_filename.split("/")[-1]),
                 avg_preds_unflattened,
