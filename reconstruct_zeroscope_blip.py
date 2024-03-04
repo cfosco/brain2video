@@ -105,17 +105,6 @@ def main(args):
     k=0
     for z, blip_emb, filename in z_blip_dataset:
 
-        # DEBUG
-        if k%7==0:
-            z2 = z_blip_dataset[np.random.randint(len(z_blip_dataset))][0]
-            # blip_emb2 = z_blip_dataset[np.random.randint(len(z_blip_dataset))][1]
-        k+=1
-        a = np.random.randn()*0.5 + 0.5
-        z = z*(1-a)+z2*a + torch.tensor(np.random.randn(4, 15, 33, 33)).float() * 0.9 #+ torch.tensor(np.random.randn()).float()
-        blip_emb = blip_emb  + torch.tensor(np.random.randn(226, 768)).float() * 0.5 #+ blip_emb2*a
-
-
-
         z = z.cuda()
         blip_emb = blip_emb.cuda()
         filename = filename.split(".")[0]
