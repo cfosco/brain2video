@@ -656,6 +656,7 @@ if __name__ == "__main__":
     image = image.resize((1024, 576))
 
     generator = torch.manual_seed(42)
+    image = [image, image]
 
     image_embeddings = pipe.get_image_embeddings(image)
     image_latents = pipe.get_image_latents(image)

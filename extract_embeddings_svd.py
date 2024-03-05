@@ -6,7 +6,6 @@ import torch
 from diffusers import DiffusionPipeline
 
 from diffusers import StableVideoDiffusionPipeline
-from diffusers.utils import load_image, export_to_video
 from PIL import Image
 from tqdm import tqdm
 from transformers import (
@@ -16,6 +15,7 @@ from transformers import (
 )
 
 from dataset import DATASET_OUTPUT_TYPES, DATASET_PATHS, STIM_DATASET_MAP
+from svd import CustomStableVideoDiffusionPipeline
 
 
 def main(args):
@@ -71,6 +71,17 @@ def main(args):
     elif args.emb_wanted == "clip_c" and DATASET_OUTPUT_TYPES[args.dataset] == "video":
         get_emb = CLIPVideoEmbeddingPipeline(device)
         out_folder = "clip_emb_257x1024"
+
+    elif args.emb_wanted == "svd_emb" and DATASET_OUTPUT_TYPES[args.dataset] == "video":
+        get_emb = SVDVideoEmbeddingPipeline(device)
+        out_folder = "svd_emb_1024"
+
+    elif (
+        args.emb_wanted == "svd_emb_lats"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "video"
+    ):
+        get_emb = SVDVideoEmbeddingAndLatentsPipeline(device)
+        out_folder = "svd_emb_lats_1024"
 
     if args.save_path is None:
         args.save_path = os.path.join(
@@ -258,6 +269,27 @@ class SVDVideoEmbeddingPipeline:
             embeddings = embeddings[:, 0]
 
         return embeddings
+
+
+class SVDVideoEmbeddingAndLatentsPipeline:
+    def __init__(self, device="cuda"):
+        self.device = device
+
+        self.pipe: CustomStableVideoDiffusionPipeline = (
+            CustomStableVideoDiffusionPipeline.from_pretrained(
+                "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
+                torch_dtype=torch.float16,
+                variant="fp16",
+            )
+        )
+        self.pipe.enable_model_cpu_offload()
+
+    def __call__(self, vid_batch):
+        with torch.no_grad():
+            embeddings_and_latents = self.pipe.get_embeddings_and_latents(vid_batch)
+            packed = self.pipe.pack_embeddings_and_latents(**embeddings_and_latents)
+
+        return packed
 
 
 def save_embedding(path, embedding):
