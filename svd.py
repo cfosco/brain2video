@@ -38,6 +38,7 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         do_classifier_free_guidance: bool = False,
         height: int = 576,
         width: int = 1024,
+        output_device: str = "cpu",
     ):
         device = self._execution_device
         self._guidance_scale = max_guidance_scale
@@ -58,7 +59,9 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             do_classifier_free_guidance=do_classifier_free_guidance,
         )
         print(f"image_latents: {image_latents.shape}")
-        return image_latents
+        if needs_upcasting:
+            self.vae.to(dtype=torch.float16)
+        return image_latents.to(output_device)
 
     @torch.no_grad()
     def generate_from_image_embeddings(
@@ -436,6 +439,8 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         )
         device = self._execution_device
         self._guidance_scale = max_guidance_scale
+        image_embeddings = image_embeddings.to(device, dtype=self.vae.dtype)
+        image_latents = image_latents.to(device, dtype=self.vae.dtype)
 
         # 1. Check inputs. Raise error if not correct
         print(f"image_embeddings: {image_embeddings.shape}")
@@ -570,7 +575,6 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             # cast back to fp16 if needed
             if needs_upcasting:
                 self.vae.to(dtype=torch.float16)
-            self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
             frames = tensor2vid(frames, self.image_processor, output_type=output_type)
         else:
@@ -582,6 +586,57 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             return frames
 
         return StableVideoDiffusionPipelineOutput(frames=frames)
+
+    def get_embeddings_and_latents(self, image, device="cuda", output_device="cpu"):
+        image_embeddings = self.get_image_embeddings(image, device, output_device)
+        image_latents = self.get_image_latents(image, output_device=output_device)
+        return {
+            "image_embeddings": image_embeddings,
+            "image_latents": image_latents,
+        }
+
+    def pack_embeddings_and_latents(self, image_embeddings, image_latents):
+        """Flatten and concatenate image_embeddings and image_latents..
+
+        Assumes either single or batched inputs. If single, adds batch dimension.
+
+        """
+        if image_latents.ndim < 3:
+            # if not batched, add batch dimension
+            image_latents = image_latents.unsqueeze(0)
+
+        if image_embeddings.ndim == 1:
+            # if not batched, add batch dimension
+            # [d] - > [1, 1, d]
+            image_embeddings = image_embeddings.unsqueeze(0).unsqueeze(0)
+        if (
+            image_embeddings.ndim == 2
+            and image_embeddings.shape[0] == image_latents.shape[0]
+        ):
+            # if batched, but missing dim, add it
+            # [b, d] -> [b, 1, d]
+            image_embeddings = image_embeddings.unsqueeze(1)
+        assert image_embeddings.shape[0] == image_latents.shape[0]
+        bs = image_embeddings.shape[0]
+        return torch.cat(
+            [image_embeddings.view(bs, -1), image_latents.view(bs, -1)], dim=1
+        )
+
+    def unpack_embeddings_and_latents(self, embeddings_and_latents):
+        """Unpack and reshape concatenated image_embeddings and image_latents.
+
+        Assumes image_embeddings are strictly 1024 elements
+        """
+        d = 1024
+        el = embeddings_and_latents
+        bs = embeddings_and_latents.shape[0]
+        image_embeddings, flattened_latents = el[:, :d], el[:, d:]
+        image_embeddings = image_embeddings.unsqueeze(1)  # [b, 1, d]
+        image_latents = flattened_latents.view(bs, 4, 72, 128)
+        return {
+            "image_embeddings": image_embeddings,
+            "image_latents": image_latents,
+        }
 
 
 if __name__ == "__main__":
@@ -608,6 +663,22 @@ if __name__ == "__main__":
     print(image_embeddings.shape)
     print(image_latents.shape)
 
+    embeddings_and_latents = pipe.get_embeddings_and_latents(image)
+    for k, v in embeddings_and_latents.items():
+        print(k, v.shape)
+
+    packed = pipe.pack_embeddings_and_latents(**embeddings_and_latents)
+    print("packed: ")
+    print(packed.shape)
+    unpacked = pipe.unpack_embeddings_and_latents(packed)
+    for k, v in unpacked.items():
+        print(k, v.shape)
+        print(torch.allclose(v, embeddings_and_latents[k].float()))
+
+    image_embeddings = unpacked["image_embeddings"]
+    image_latents = unpacked["image_latents"]
+    print(image_embeddings.dtype)
+    print(image_latents.dtype)
     # frames = pipe(image, decode_chunk_size=8, generator=generator).frames[0]
     out = pipe.generate_from_image_embeddings_latents(
         image_embeddings,
