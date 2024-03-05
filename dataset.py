@@ -20,7 +20,6 @@ import abc
 
 ### --------------- Abstract Dataset Classes
 
-
 class VideoDataset(data.Dataset, abc.ABC):
     """Abstract Dataset class for returning video stimuli."""
 
@@ -397,9 +396,6 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
 
         return targets_filenames
 
-
-# TODO Clean up
-
 class ReconstructionDataset(data.Dataset, abc.ABC):
     """Abstract dataset returning conditioning vectors (either ground truth or predicted) that can be
     used by a diffusion model (e.g. zeroscope) to reconstruct stimuli."""
@@ -432,7 +428,7 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
         self.return_filenames = return_filenames
         self.rearrange_funcs = rearrange_funcs
 
-        self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys())
+        self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys()) # Variable to overwrite cond vectors to use if needed
         self.large_npys = {}
         # Check if given path contains large singular npy files or individual npy files for each stimuli
 
@@ -442,31 +438,7 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
                     os.path.join(path, f"preds_{subset}.npy")
                 )
 
-        self.filenames = self.get_stim_paths(subset, metadata_path)
-
-    def get_stim_paths(self, subset, metadata_path):
-        if metadata_path is None: # Assume BMD
-            ran = (
-                range(1, 1001) if subset == "train" else range(1001, 1103)
-            )  # Indexes of train and test sets of BMD
-            
-            return [f"{i:04d}.npy" for i in ran]
-
-
-        if subset == 'train':
-            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
-        elif subset == 'test':
-            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json'))) #
-        elif subset == 'all':
-            self.video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
-            self.video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
-            self.video_paths = self.video_paths_train + self.video_paths_test
-        else:
-            raise ValueError(f'Unknown subset {subset}')
-            
-        # print('self.video_paths', self.video_paths)
-        self.video_paths = sorted(self.video_paths)
-        return [f+'.npy' for f in self.video_paths]
+        self.filenames = self.get_stim_names(subset, metadata_path)
 
     def __len__(self):
         return len(self.filenames)
@@ -474,28 +446,32 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
     def __getitem__(self, idx):
         ret = ()
         for cond_name, path in self.cond_vectors_paths_dict.items():
-            # print("cond_name", cond_name)
-            # print("path", path)
+            print("cond_name", cond_name)
+            print("path", path)
             if cond_name not in self.cond_vectors_to_use:
                 continue
             if cond_name in self.large_npys:
                 cond_vector = self.large_npys[cond_name][idx]
                 is_flat = True
             else:
-                cond_vector = np.load(os.path.join(path, self.filenames[idx])).squeeze()
+                print("self.filenames[idx]", self.filenames[idx])
+                cond_vector = np.load(os.path.join(path, self.filenames[idx]+'.npy')).squeeze()
+                
                 if cond_vector.ndim == 1:
                     is_flat = True
                 else:
                     is_flat = False
 
-            # print(f"{cond_name}.shape before rearrange", cond_vector.shape)
+            print(f"{cond_name}.shape before rearrange", cond_vector.shape)
             if cond_name in self.rearrange_funcs and is_flat:
                 cond_vector = self.rearrange_funcs[cond_name](cond_vector)
 
-            # DEBUG
+            # TODO: Improve. Currently needing this swapaxes for z because they are saved as [15,4,3,33] (frames first) and they should be of shape (4,15,33,33) (channels first) for zeroscope to interpret them correctly
             if cond_name == "z" and cond_vector.shape[0] == 15:
                 cond_vector = cond_vector.swapaxes(0, 1)
-            # print("final cond_vector.shape", cond_vector.shape)
+
+            
+            print("final cond_vector.shape", cond_vector.shape)
             cond_vector = torch.tensor(cond_vector).float()
             ret = ret + (cond_vector,)
 
@@ -524,10 +500,321 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
             return False
 
 
+
+### --------------- BOLDMoments Datasets
+
+class BMDVideoDataset(VideoDataset):
+    """Dataset for BMD returning video stimuli."""
+
+    def get_video_paths(self, subset, metadata_path):
+        '''Returns list of video paths for a given subset'''
+
+        suffix=''
+        if not self.load_from_frames:
+            suffix='.mp4'
+
+        if subset == 'train':
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1001)]
+        elif subset == 'test':
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1001,1103)]
+        elif subset == 'all':
+            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1103)]
+        else: 
+            raise ValueError(f'Unknown subset {subset}')
+        
+        self.vid_paths = vid_paths
+        return vid_paths
+
+class BMDCaptionsDataset(CaptionsDataset):
+    pass
+
+class BMDBetasAndTargetsDataset(BetasAndTargetsDataset):
+
+    @property
+    def pkl_suffix(self):
+        return "_betas-GLMsingle_type-typed_z=1"
+    
+    @property
+    def train_reps(self):
+        self.BMD_TRAIN_REPS = 3
+        return self.BMD_TRAIN_REPS
+    
+    @property
+    def test_reps(self):
+        self.BMD_TEST_REPS = 10
+        return self.BMD_TEST_REPS
+
+    def get_stim_names(self, subset, metadata_path):
+        # TODO replace this with loading a json in metadata_bmd with the stim names
+        if subset == 'train':
+            stim_names = [f'{i:04d}' for i in range(1, 1001)]
+            self.n_reps = self.train_reps
+        elif subset == 'test':
+            stim_names = [f'{i:04d}' for i in range(1001, 1103)]
+            self.n_reps = self.test_reps
+        elif subset == 'all':
+            stim_names = [f'{i:04d}' for i in range(1, 1103)]
+            self.n_reps = self.train_reps
+
+        return stim_names    
+
+class BMDReconstructionDataset(ReconstructionDataset):
+
+    def get_stim_names(self, subset, metadata_path):
+        # TODO replace this with loading a json in metadata_bmd with the stim names
+        if subset == 'train':
+            stim_names = [f'{i:04d}' for i in range(1, 1001)]
+        elif subset == 'test':
+            stim_names = [f'{i:04d}' for i in range(1001, 1103)]
+        elif subset == 'all':
+            stim_names = [f'{i:04d}' for i in range(1, 1103)]
+
+        return stim_names    
+
+
+### --------------- CC2017 Datasets
+
+class CC2017VideoDataset(VideoDataset):
+    '''Dataset for CC2017 returning video stimuli.'''
+
+    def get_video_paths(self, subset, metadata_path):
+
+        if subset == 'train':
+            video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+        elif subset == 'test':
+            video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
+        elif subset == 'all':
+            video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+            video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
+            video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+            
+        # print('self.video_paths', self.video_paths)
+        self.vid_paths = video_paths
+        return video_paths
+
+class CC2017CaptionsDataset(CaptionsDataset):
+    pass
+
+class CC2017BetasAndTargetsDataset(BetasAndTargetsDataset):
+
+    @property
+    def pkl_suffix(self):
+        return "_estimates-TSTrialEstimates_z=1"
+
+    @property
+    def train_reps(self):
+        self.CC2017_TRAIN_REPS = 2
+        return self.CC2017_TRAIN_REPS
+    
+    @property
+    def test_reps(self):
+        self.CC2017_TEST_REPS = 10
+        return self.CC2017_TEST_REPS
+
+    def get_stim_names(self, subset, metadata_path):
+        if subset == 'train':
+            stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
+        elif subset == 'test':
+            stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
+        elif subset == 'all':
+            stim_names_train = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
+            stim_names_test = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
+            stim_names = stim_names_train + stim_names_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+        
+        if stim_names[0].endswith('.mp4'):
+            stim_names = [s[:-4] for s in stim_names]
+
+        self.stim_names = stim_names
+
+        return self.stim_names
+    
+class CC2017ReconstructionDataset(ReconstructionDataset):
+
+    # TODO: this functionality is repeated accross all CC2017 datasets. Refactor: extract logic as a utility function
+    def get_stim_names(self, subset, metadata_path):
+
+        if subset == 'train':
+            video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+        elif subset == 'test':
+            video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json'))) #
+        elif subset == 'all':
+            video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
+            video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
+            video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+        
+        if video_paths[0].endswith('.mp4'):
+            stim_names = [s[:-4] for s in video_paths]
+        else:
+            stim_names = video_paths
+
+        return stim_names
+
+
+
+
+### --------------- HAD Datasets
+
+class HADVideoDataset(VideoDataset):
+    """Dataset for HAD returning video stimuli."""
+
+    def get_video_paths(self, subset, metadata_path):
+        """Returns list of video paths for a given subset"""
+        if subset == "train":
+            video_paths = json.load(
+                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
+            )
+        elif subset == "test":
+            video_paths = json.load(
+                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
+            )
+        elif subset == "all":
+            video_paths_train = json.load(
+                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
+            )
+            video_paths_test = json.load(
+                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
+            )
+            video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f"Unknown subset {subset}")
+
+        self.vid_paths = video_paths
+        return video_paths
+
+class HADCaptionsDataset(CaptionsDataset):
+    pass
+
+class HADBetasAndTargetsDataset(BetasAndTargetsDataset):
+
+    @property
+    def pkl_suffix(self):
+        return "_betas-GLMsingle_type-typeb_z=1"
+    
+    @property
+    def train_reps(self):
+        self.HAD_TRAIN_REPS = 1
+        return self.HAD_TRAIN_REPS
+
+    @property
+    def test_reps(self):
+        self.HAD_TEST_REPS = 1
+        return self.HAD_TEST_REPS
+
+    def get_stim_names(self, subset, metadata_path):
+        """Returns list of stimuli paths for a given subset"""
+
+        video_paths = []
+        if subset == "train":
+            train_set = json.load(
+                open(os.path.join(metadata_path, "had_train_set_per_subject.json"))
+            )
+            for sub in self.subs:
+                video_paths.extend(train_set[f'sub{sub:02d}'])
+        elif subset == "test":
+            test_set = json.load(
+                open(os.path.join(metadata_path, "had_test_set_per_subject.json"))
+            )
+            for sub in self.subs:
+                video_paths.extend(test_set[f'sub{sub:02d}'])
+        elif subset == "all":
+            train_set = json.load(
+                open(os.path.join(metadata_path, "had_train_set_per_subject.json"))
+            )
+            test_set = json.load(
+                open(os.path.join(metadata_path, "had_test_set_per_subject.json"))
+            )
+            for sub in self.subs:
+                video_paths.extend(train_set[f'sub{sub:02d}'])
+                video_paths.extend(test_set[f'sub{sub:02d}'])
+
+        else:
+            raise ValueError(f"Unknown subset {subset}")
+
+        stim_names = []
+        for v in video_paths:
+            # v = v.split('/')[-1]
+            if v.endswith('.mp4'):
+                v = v[:-4]
+            stim_names.append(v)
+                
+        return stim_names        
+
+class HADReconstructionDataset(ReconstructionDataset):
+    
+
+    # TODO: this functionality is repeated accross all HAD datasets. Refactor: extract logic as a utility function
+    def get_stim_names(self, subset, metadata_path):
+
+        if subset == 'train':
+            video_paths = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
+        elif subset == 'test':
+            video_paths = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json'))) #
+        elif subset == 'all':
+            video_paths_train = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
+            video_paths_test = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json')))
+            video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f'Unknown subset {subset}')
+        
+        if video_paths[0].endswith('.mp4'):
+            stim_names = [s[:-4] for s in video_paths]
+        else:
+            stim_names = video_paths
+
+        return stim_names
+
+
+
+### --------------- NOD Datasets
+
+class NODImageDataset(ImageDataset):
+    """Dataset for NOD returning image stimuli."""
+
+    def get_video_paths(self, subset, metadata_path):
+        """Returns list of video paths for a given subset"""
+        if subset == "train":
+            self.video_paths = json.load(
+                open(os.path.join(metadata_path, "nod_train_set_video_paths.json"))
+            )
+        elif subset == "test":
+            self.video_paths = json.load(
+                open(os.path.join(metadata_path, "nod_test_set_video_paths.json"))
+            )
+        elif subset == "all":
+            video_paths_train = json.load(
+                open(os.path.join(metadata_path, "nod_train_set_video_paths.json"))
+            )
+            video_paths_test = json.load(
+                open(os.path.join(metadata_path, "nod_test_set_video_paths.json"))
+            )
+            self.video_paths = video_paths_train + video_paths_test
+        else:
+            raise ValueError(f"Unknown subset {subset}")
+
+
+        return self.video_paths
+
+class NODCaptionsDataset(CaptionsDataset):
+    pass
+
+class NODBetasAndTargetsDataset(BetasAndTargetsDataset):
+    pass
+
+class NODReconstructionDataset(ReconstructionDataset):
+    pass
+
+
+
+
 ### --------------- NSD Datasets
 
-
-class NSDImageDataset(data.Dataset):
+class NSDImageDataset(ImageDataset):
     """Dataset for NSD returning image data."""
 
     def __init__(
@@ -588,100 +875,248 @@ class NSDImageDataset(data.Dataset):
         image = torch.from_numpy(image)
         return 2.0 * image - 1.0
 
-
-class NSDCaptionsDataset(data.Dataset):
+class NSDCaptionsDataset(CaptionsDataset):
     pass
     # if use_captions:
     #     self.captions = self.nsda.read_image_coco_info(idxs, info_type='captions') # Return list of lists of dicts. Each element in the first list is an image. Each element in the second list is a dict for a caption.
 
+class NSDBetasAndTargetsDataset(BetasAndTargetsDataset):
+    pass
 
-class NSDBetasAndTargetsDataset(data.Dataset):
+class NSDReconstructionDataset(ReconstructionDataset):
     pass
 
 
-class NSDBetasAndTargetsDatasetOld(data.Dataset):
-    """
-    NSD Dataset returning betas and targets.
+
+
+### -------------- Maps
+
+# TODO transform into config files for each dataset, to make it easy to add a new one
+STIM_DATASET_MAP = {
+    'bmd': BMDVideoDataset,
+    'bmd_captions': BMDCaptionsDataset,
+    'had': HADVideoDataset,
+    'nsd': NSDImageDataset,
+    'nod': NODImageDataset,
+    'cc2017': CC2017VideoDataset,
+}
+
+BT_DATASET_MAP = {
+    'bmd': BMDBetasAndTargetsDataset,
+    'bmd_captions': BMDBetasAndTargetsDataset,
+    'had': HADBetasAndTargetsDataset,
+    'nsd': NSDBetasAndTargetsDataset,
+    'nod': NODBetasAndTargetsDataset,
+    'cc2017': CC2017BetasAndTargetsDataset,
+}
+
+RECONSTRUCTION_DATASET_MAP = {
+    'bmd': BMDReconstructionDataset,
+    'bmd_captions': BMDReconstructionDataset,
+    'had': HADReconstructionDataset,
+    'nsd': NSDReconstructionDataset,
+    'nod': NODReconstructionDataset,
+    'cc2017': CC2017ReconstructionDataset,
+}
+
+DATASET_OUTPUT_TYPES = {
+    'bmd': 'video',
+    'bmd_captions': 'text',
+    'had': 'video',
+    'nsd': 'image',
+    'nod': 'image',
+    'cc2017': 'video',
+} 
+
+DATASET_PATHS = {
+    'bmd': 
+        {'stimuli': './data/stimuli_bmd/mp4', 
+        'metadata': './data/metadata_bmd',
+        'betas': './data/betas_cifti_bmd',
+        'targets': './data/target_vectors_bmd'
+        },
+    'bmd_captions': 
+        {'stimuli': './data/stimuli_bmd/captions', 
+        'metadata': './data/metadata_bmd_captions',
+        'betas': './data/betas_cifti_bmd',
+        'targets': './data/target_vectors_bmd_captions'
+        },
+    'had': 
+        {'stimuli':'./data/stimuli_had', 
+        'metadata':'./data/metadata_had',
+        'betas':'./data/betas_cifti_had',
+        'targets':'./data/target_vectors_had'
+        },
+    'nsd': 
+        {'stimuli': './data/stimuli_nsd', 
+        'metadata': './data/metadata_nsd',
+        'betas': './data/betas_cifti_nsd',
+        'targets': './data/target_vectors_nsd'
+        },
+    'nod': 
+        {'stimuli': './data/stimuli_nod', 
+        'metadata': './data/metadata_nod',
+        'betas': './data/betas_cifti_nod',
+        'targets': './data/target_vectors_nod'
+        },
+    'cc2017': 
+        {'stimuli': './data/stimuli_cc2017', 
+        'metadata': './data/metadata_cc2017',
+        'betas': './data/betas_cifti_cc2017',
+        'targets': './data/target_vectors_cc2017'
+        },
+}
+
+
+
+
+
+
+
+
+
+
+### -------------  OLD AND DEPRECATED DATASETS
+
+
+class NSDReconstructionDatasetOld():
+    '''Dataset for NSD data returning conditioning vectors (either ground truth or predicted) that can be
+    used by a diffusion model (e.g. zeroscope) to reconstruct the NSD images.'''
+
+    def __init__(self,
+                 cond_vectors_paths_dict,
+                 subset='test',
+                 return_filenames=True,
+                 rearrange_expressions=None):
+        '''Constructor for NSDReconstructionDataset.
+
+        Args:
+            cond_vectors_paths_dict (dict): dictionary with keys corresponding
+                to the conditioning vector name (e.g. 'z', 'blip' and 'c') and
+                values corresponding to the paths to the conditioning vectors folders.
+                The folders should either contain a large npy file with all the vectors
+                for a subset of NSD (e.g. preds_train) or a set of individual npy files for each NSD image (e.g. 1001.npy)
+            subset (str): 'train' or 'test'
+            return_filenames (bool): whether to return the filename of the conditioning vector
+        '''
+
+        self.cond_vectors_paths_dict = cond_vectors_paths_dict
+        self.subset = subset
+        self.return_filenames = return_filenames
+
+        self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys())
+        self.large_npys = {}
+        # Check if given path contains large singular npy files or individual npy files for each stimuli
+
+        for cond_name, path in cond_vectors_paths_dict.items():
+            if self.check_if_large_npys(path):
+                self.large_npys[cond_name] = np.load(os.path.join(path, f'preds_{subset}.npy'))
+
+        ran = range(0,73000) # Indexes of train and test sets of NSD
+        self.filenames = [f'{i:06d}.npy' for i in ran]
+
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+
+        ret = ()
+        for cond_name, path in self.cond_vectors_paths_dict.items():
+            if cond_name not in self.cond_vectors_to_use:
+                continue
+            if cond_name in self.large_npys:
+                cond_vector = self.large_npys[cond_name][idx]
+                flattened_vecs = True
+            else:
+                cond_vector = np.load(os.path.join(path, self.filenames[idx]))
+                if cond_vector.ndim == 1:
+                    flattened_vecs = True
+            if self.rearrange_expressions is not None and cond_name in self.rearrange_expressions and flattened_vecs:
+                cond_vector = rearrange(cond_vector, self.rearrange_expressions[cond_name])
+
+        if self.return_filenames:
+            return ret + (self.filenames[idx],)
+        return ret
+
+
+class HADBetasAndTargetsDatasetOld(data.Dataset):
+    """Dataset for HAD data returning betas and targets.
+
+    Can concatenate betas from multiple subjects and ROIs.
+    Returns either train, test or both depending on the subset parameter
     """
 
     def __init__(
         self,
         betas_path,
         targets_path,
-        metadata_path="data/metadata_nsd",
+        metadata_path="../data/metadata_had",
         avg_reps=False,
-        rois=["BMDgeneral"],
+        beta_type="impulse",
+        rois=["Group41"],
         subs=[1],
-        subset="both",
+        subset="train",
         load_all_in_ram=False,
+        use_noise_ceiling=True,
         return_filename=False,
         flatten_targets=True,
-        num_frames_to_simulate=15,
     ):
         """
-        Constructor for NSDBetasAndTargetsDataset.
+        Constructor for HADBetasAndTargetsDataset.
+
 
         Args:
-            betas_path (str): path to NSD betas. This path should point to a folder containing subject subfolders called sub01, sub02, etc.
-            targets_path (str): Path to target vectors. The folder this path points to should contain 73000 npy arrays corresponding to the target vectors for each NSD stimuli.
-            avg_reps (bool): whether to average over repetitions
+            betas_path (str): path to HAD betas.
+                This path should point to a folder containing subject subfolders called sub01, sub02, etc.
+            targets_path (str): path to target vectors, e.g. data/target_vectors_bmd/z_zeroscope
+            avg_train_reps (bool): whether to average over repetitions in training data
+            beta_type (str): 'impulse' or 'raw'
             rois (list): list of ROIs to include
             subs (list): list of subjects to include
             subset (str): 'train', 'test' or 'both'
+            load_all_in_ram (bool): whether to load all data in RAM. If False, data will be loaded on the fly
+            use_noise_ceiling (bool): whether to multiply features by noise ceiling
         """
 
-        if load_all_in_ram:
-            self.betas = []
-            self.targets = []
+        self.betas = []
+        self.targets = []
         self.betas_filenames = []
         self.targets_filenames = []
 
         self.betas_path = betas_path
         self.targets_path = targets_path
         self.avg_reps = avg_reps
+        self.beta_type = beta_type
         self.rois = rois
         self.subs = subs
         self.subset = subset
         self.load_all_in_ram = load_all_in_ram
+        self.use_noise_ceiling = use_noise_ceiling
         self.return_filename = return_filename
         self.flatten_targets = flatten_targets
-        self.num_frames_to_simulate = num_frames_to_simulate
-        self.NSD_REPS = 3
 
-        if not avg_reps:
-            self.repeat_targets = self.NSD_REPS
-        else:
-            self.repeat_targets = 1
-
-        nsd_expdesign = scipy.io.loadmat(os.path.join(metadata_path, "nsd_expdesign.mat"))
-        test_idxs = nsd_expdesign["sharedix"] - 1
+        if subset == "train":
+            self.stim_names_to_use = json.load(
+                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
+            )
+        elif subset == "test":
+            self.stim_names_to_use = json.load(
+                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
+            )
 
         for sub in subs:
             if load_all_in_ram:
-                self.betas.extend(self.load_all_nsd_betas_impulse(sub))
-                self.targets.extend(self.load_all_target_vectors_nsd(sub))
+                # TODO Finish
+                self.betas = self.load_all_had_betas()
+                self.targets = self.load_all_target_vectors_had()
             else:
-                # Load pickle with ids of stimuli used for this subject
-                with open(
-                    os.path.join(betas_path, f"sub{sub:02d}/events_imgtag-73k_id.pkl"),
-                    "rb",
-                ) as f:
-                    self.stim_idxs = [
-                        i - 1 for i in pkl.load(f)[0]
-                    ]  # Substract 1 because the pkl is 1-indexed, but nsda.read_images expects 0-indexed inputs (goes from 0-72999)
-
-                if subset == "train":
-                    self.stim_idxs = [i for i in self.stim_idxs if i not in test_idxs]
-                elif subset == "test":
-                    self.stim_idxs = [i for i in self.stim_idxs if i in test_idxs]
-
-                # print(f"self.stim_idxs len for subset {subset}", len(self.stim_idxs))
-
-                self.betas_filenames.extend(self.gather_betas_impulse_filenames(sub))
+                # self.betas_filenames.extend(self.gather_betas_impulse_filenames(sub))
+                self.betas_filenames.extend(self.gather_betas_filenames(sub))
                 self.targets_filenames.extend(self.gather_target_filenames())
 
     def __len__(self):
-        return len(self.betas_filenames)
+        return len(self.betas) if self.load_all_in_ram else len(self.betas_filenames)
 
     def __getitem__(self, idx):
         if self.load_all_in_ram:
@@ -700,193 +1135,55 @@ class NSDBetasAndTargetsDatasetOld(data.Dataset):
     def load_beta(self, idx):
         betas = []
         for roi in self.rois:
-            roi_folder = roi + "_betas-GLMsingle_type-typeb_z=1"
+            roi_folder = f"{roi}_betas-GLMsingle_type-typeb_z=1"
             beta_filename = self.betas_filenames[idx].replace(
                 "ROI_FOLDER_PLACEHOLDER", roi_folder
             )
-            if self.avg_reps:
-                # If npy file with average of reps exists, load it. Otherwise, average repetitions on the fly
-                if os.path.exists(os.path.join(self.betas_path, beta_filename)):
-                    betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
-                else:  # Average repetitions on the fly
-                    rep = []
-                    for r in range(self.NSD_REPS):
-                        rep.append(
-                            np.load(
-                                os.path.join(
-                                    self.betas_path, beta_filename[:-4] + f"_{r}.npy"
-                                )
-                            )
-                        )
-                    avg_reps = np.mean(rep, axis=0)
-                    betas.append(avg_reps)
-            else:
-                betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
+
+            betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
         return np.concatenate(betas)
 
     def load_target(self, idx):
         target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
-        target = np.repeat(target[None], self.num_frames_to_simulate, axis=0)
-        if self.flatten_targets:
-            return target.reshape(-1)
-        return target
+        return target.reshape(-1) if self.flatten_targets else target
 
-    def gather_betas_impulse_filenames(self, sub: int) -> list:
+    def gather_betas_filenames(self, sub: int) -> list:
+        """
+        Gathers beta filenames for the HAD dataset. Requires self.stim_names_to_use to be defined.
+        self.stim_names_to_use must be a list of HAD video names to use in this dataset,
+        typically a list of training videos or a list of test videos. Stim name example: v_Archery_id_9FFEroHG-fY_start_59.5_label_1
+        """
         betas_filenames = []
-
-        for i in self.stim_idxs:
-            if self.avg_reps:
-                betas_filenames.append(
-                    os.path.join(
-                        f"sub{sub:02d}",
-                        "indiv_npys_avg",
-                        "ROI_FOLDER_PLACEHOLDER",
-                        f"{i:06d}.npy",
-                    )
-                )
-            else:
-                for rep in range(self.repeat_targets):
-                    betas_filenames.append(
-                        os.path.join(
-                            f"sub{sub:02d}",
-                            "indiv_npys",
-                            "ROI_FOLDER_PLACEHOLDER",
-                            f"{i:06d}_{rep}.npy",
-                        )
-                    )
-
+        for s in self.stim_names_to_use:  # Stim names to use must be a list of the HAD video names to use in this dataset, typically a list of training videos or a list of test videos. Stim name example: 'v_Archery_id_9FFEroHG-fY_start_59.5_label_1'
+            s = s.split("/")[-1].replace(".mp4", ".npy")
+            betas_filenames.append(
+                os.path.join(f"sub{sub:02d}", "indiv_npys", "ROI_FOLDER_PLACEHOLDER", s)
+            )
         return betas_filenames
 
-    def gather_target_filenames(self) -> list:
+    def gather_target_filenames(self):
         targets_filenames = []
-
-        for i in self.stim_idxs:
-            for _ in range(self.repeat_targets):
-                targets_filenames.append(f"{i:06d}.npy")
-
+        for s in self.stim_names_to_use:
+            targets_filenames.append(s)
         return targets_filenames
 
     ## Functions to load all in RAM
-    def load_all_nsd_betas_impulse(
-        self, betas_path: str, sub: int, rois: list, avg_reps=True, subset="train"
-    ) -> None:
-        subj_betas_path = os.path.join(betas_path, f"sub{sub:02d}")
-        betas_sub = []
-
-        for roi in rois:
-            pkl_name = f"{roi}_betas-GLMsingle_type-typeb_z=1.pkl"
-
-            with open(
-                os.path.join(subj_betas_path, "prepared_allvoxel_pkl", pkl_name), "rb"
-            ) as f:
-                data = pkl.load(f)
-
-            if avg_reps:
-                betas_sub.append(np.mean(data["data_allvoxel"], axis=1))
-            else:
-                # Concatenate all repetitions into dim 0
-                b = np.concatenate(
-                    [
-                        data["data_allvoxel"][:, i, :]
-                        for i in range(data["data_allvoxel"].shape[1])
-                    ]
-                )
-                betas_sub.append(b)
-
-        # TODO: add noise ceiling
-
-        return np.concatenate(betas_sub, axis=1)
-
-    def load_target_vectors_nsd(
-        self,
-        path_to_target_vectors: str,
-        subject: int,
-        subset: str = "train",
-        repeat_targets=1,
-    ) -> None:
+    def load_all_had_betas(self):
         """
-        Load target vectors for a given subject
+        Load all HAD betas in RAM.
+        Returns a list of betas, where each element is an array of betas for a given subject and ROI.
+        """
+        betas = []
+        raise NotImplementedError
+
+    def load_all_target_vectors_had(self):
+        """
+        Load all HAD target vectors in RAM.
+        Returns a list of target vectors, where each element is a target vector for a given subject.
         """
         targets = []
+        raise NotImplementedError
 
-        # Load training pickle
-        with open(
-            f"{self.betas_path}/sub{subject:02d}/events_imgtag-73k_id.pkl", "rb"
-        ) as f:
-            img_idxs = pkl.load(f)
-
-        train_list = img_idxs[0]
-        for target in train_list:
-            targets.append(np.load(f"{path_to_target_vectors}/{target-1:06d}.npy"))
-
-        targets = np.array(targets * repeat_targets)
-
-        # flatten vectors
-        targets = targets.reshape(targets.shape[0], -1)
-
-        print(
-            f"Loaded {len(img_idxs[0])} NSD img_idxs for subject {subject}, starting with {img_idxs[0][0:5]}"
-        )
-
-        return targets
-
-
-### --------------- BOLDMoments Datasets
-
-
-class BMDVideoDataset(VideoDataset):
-    """Dataset for BMD returning video stimuli."""
-
-    def get_video_paths(self, subset, metadata_path):
-        '''Returns list of video paths for a given subset'''
-
-        suffix=''
-        if not self.load_from_frames:
-            suffix='.mp4'
-
-        if subset == 'train':
-            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1001)]
-        elif subset == 'test':
-            vid_paths = [f'{i:04d}{suffix}' for i in range(1001,1103)]
-        elif subset == 'all':
-            vid_paths = [f'{i:04d}{suffix}' for i in range(1,1103)]
-        else: 
-            raise ValueError(f'Unknown subset {subset}')
-        
-        return vid_paths
-
-class BMDCaptionsDataset(CaptionsDataset):
-    pass
-
-class BMDBetasAndTargetsDataset(BetasAndTargetsDataset):
-
-    @property
-    def pkl_suffix(self):
-        return "_betas-GLMsingle_type-typed_z=1"
-    
-    @property
-    def train_reps(self):
-        self.BMD_TRAIN_REPS = 3
-        return self.BMD_TRAIN_REPS
-    
-    @property
-    def test_reps(self):
-        self.BMD_TEST_REPS = 10
-        return self.BMD_TEST_REPS
-
-    def get_stim_names(self, subset, metadata_path):
-        # TODO replace this with loading a json in metadata_bmd with the stim names
-        if subset == 'train':
-            stim_names = [f'{i:04d}' for i in range(1, 1001)]
-            self.n_reps = self.train_reps
-        elif subset == 'test':
-            stim_names = [f'{i:04d}' for i in range(1001, 1103)]
-            self.n_reps = self.test_reps
-        elif subset == 'all':
-            stim_names = [f'{i:04d}' for i in range(1, 1103)]
-            self.n_reps = self.train_reps
-
-        return stim_names    
 
 class BMDBetasAndTargetsDatasetOld(data.Dataset):
     """Dataset for BOLDMoments data returning betas and targets.
@@ -1199,170 +1496,89 @@ class BMDBetasAndTargetsDatasetOld(data.Dataset):
         return targets_arr
 
 
-### --------------- HAD Datasets
-
-
-class HADVideoDataset(VideoDataset):
-    """Dataset for HAD returning video stimuli."""
-
-    def get_video_paths(self, subset, metadata_path):
-        """Returns list of video paths for a given subset"""
-        if subset == "train":
-            video_paths = json.load(
-                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
-            )
-        elif subset == "test":
-            video_paths = json.load(
-                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
-            )
-        elif subset == "all":
-            video_paths_train = json.load(
-                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
-            )
-            video_paths_test = json.load(
-                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
-            )
-            video_paths = video_paths_train + video_paths_test
-        else:
-            raise ValueError(f"Unknown subset {subset}")
-
-        self.vid_paths = video_paths
-        return video_paths
-
-
-class HADBetasAndTargetsDataset(BetasAndTargetsDataset):
-
-    @property
-    def pkl_suffix(self):
-        return "_betas-GLMsingle_type-typeb_z=1"
-    
-    @property
-    def train_reps(self):
-        self.HAD_TRAIN_REPS = 1
-        return self.HAD_TRAIN_REPS
-
-    @property
-    def test_reps(self):
-        self.HAD_TEST_REPS = 1
-        return self.HAD_TEST_REPS
-
-    def get_stim_names(self, subset, metadata_path):
-        """Returns list of stimuli paths for a given subset"""
-
-        video_paths = []
-        if subset == "train":
-            train_set = json.load(
-                open(os.path.join(metadata_path, "had_train_set_per_subject.json"))
-            )
-            for sub in self.subs:
-                video_paths.extend(train_set[f'sub{sub:02d}'])
-        elif subset == "test":
-            test_set = json.load(
-                open(os.path.join(metadata_path, "had_test_set_per_subject.json"))
-            )
-            for sub in self.subs:
-                video_paths.extend(test_set[f'sub{sub:02d}'])
-        elif subset == "all":
-            train_set = json.load(
-                open(os.path.join(metadata_path, "had_train_set_per_subject.json"))
-            )
-            test_set = json.load(
-                open(os.path.join(metadata_path, "had_test_set_per_subject.json"))
-            )
-            for sub in self.subs:
-                video_paths.extend(train_set[f'sub{sub:02d}'])
-                video_paths.extend(test_set[f'sub{sub:02d}'])
-
-        else:
-            raise ValueError(f"Unknown subset {subset}")
-
-        stim_names = []
-        for v in video_paths:
-            # v = v.split('/')[-1]
-            if v.endswith('.mp4'):
-                v = v[:-4]
-            stim_names.append(v)
-                
-        return stim_names        
-
-
-class HADBetasAndTargetsDatasetOld(data.Dataset):
-    """Dataset for HAD data returning betas and targets.
-
-    Can concatenate betas from multiple subjects and ROIs.
-    Returns either train, test or both depending on the subset parameter
+class NSDBetasAndTargetsDatasetOld(data.Dataset):
+    """
+    NSD Dataset returning betas and targets.
     """
 
     def __init__(
         self,
         betas_path,
         targets_path,
-        metadata_path="../data/metadata_had",
+        metadata_path="data/metadata_nsd",
         avg_reps=False,
-        beta_type="impulse",
-        rois=["Group41"],
+        rois=["BMDgeneral"],
         subs=[1],
-        subset="train",
+        subset="both",
         load_all_in_ram=False,
-        use_noise_ceiling=True,
         return_filename=False,
         flatten_targets=True,
+        num_frames_to_simulate=15,
     ):
         """
-        Constructor for HADBetasAndTargetsDataset.
-
+        Constructor for NSDBetasAndTargetsDataset.
 
         Args:
-            betas_path (str): path to HAD betas.
-                This path should point to a folder containing subject subfolders called sub01, sub02, etc.
-            targets_path (str): path to target vectors, e.g. data/target_vectors_bmd/z_zeroscope
-            avg_train_reps (bool): whether to average over repetitions in training data
-            beta_type (str): 'impulse' or 'raw'
+            betas_path (str): path to NSD betas. This path should point to a folder containing subject subfolders called sub01, sub02, etc.
+            targets_path (str): Path to target vectors. The folder this path points to should contain 73000 npy arrays corresponding to the target vectors for each NSD stimuli.
+            avg_reps (bool): whether to average over repetitions
             rois (list): list of ROIs to include
             subs (list): list of subjects to include
             subset (str): 'train', 'test' or 'both'
-            load_all_in_ram (bool): whether to load all data in RAM. If False, data will be loaded on the fly
-            use_noise_ceiling (bool): whether to multiply features by noise ceiling
         """
 
-        self.betas = []
-        self.targets = []
+        if load_all_in_ram:
+            self.betas = []
+            self.targets = []
         self.betas_filenames = []
         self.targets_filenames = []
 
         self.betas_path = betas_path
         self.targets_path = targets_path
         self.avg_reps = avg_reps
-        self.beta_type = beta_type
         self.rois = rois
         self.subs = subs
         self.subset = subset
         self.load_all_in_ram = load_all_in_ram
-        self.use_noise_ceiling = use_noise_ceiling
         self.return_filename = return_filename
         self.flatten_targets = flatten_targets
+        self.num_frames_to_simulate = num_frames_to_simulate
+        self.NSD_REPS = 3
 
-        if subset == "train":
-            self.stim_names_to_use = json.load(
-                open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
-            )
-        elif subset == "test":
-            self.stim_names_to_use = json.load(
-                open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
-            )
+        if not avg_reps:
+            self.repeat_targets = self.NSD_REPS
+        else:
+            self.repeat_targets = 1
+
+        nsd_expdesign = scipy.io.loadmat(os.path.join(metadata_path, "nsd_expdesign.mat"))
+        test_idxs = nsd_expdesign["sharedix"] - 1
 
         for sub in subs:
             if load_all_in_ram:
-                # TODO Finish
-                self.betas = self.load_all_had_betas()
-                self.targets = self.load_all_target_vectors_had()
+                self.betas.extend(self.load_all_nsd_betas_impulse(sub))
+                self.targets.extend(self.load_all_target_vectors_nsd(sub))
             else:
-                # self.betas_filenames.extend(self.gather_betas_impulse_filenames(sub))
-                self.betas_filenames.extend(self.gather_betas_filenames(sub))
+                # Load pickle with ids of stimuli used for this subject
+                with open(
+                    os.path.join(betas_path, f"sub{sub:02d}/events_imgtag-73k_id.pkl"),
+                    "rb",
+                ) as f:
+                    self.stim_idxs = [
+                        i - 1 for i in pkl.load(f)[0]
+                    ]  # Substract 1 because the pkl is 1-indexed, but nsda.read_images expects 0-indexed inputs (goes from 0-72999)
+
+                if subset == "train":
+                    self.stim_idxs = [i for i in self.stim_idxs if i not in test_idxs]
+                elif subset == "test":
+                    self.stim_idxs = [i for i in self.stim_idxs if i in test_idxs]
+
+                # print(f"self.stim_idxs len for subset {subset}", len(self.stim_idxs))
+
+                self.betas_filenames.extend(self.gather_betas_impulse_filenames(sub))
                 self.targets_filenames.extend(self.gather_target_filenames())
 
     def __len__(self):
-        return len(self.betas) if self.load_all_in_ram else len(self.betas_filenames)
+        return len(self.betas_filenames)
 
     def __getitem__(self, idx):
         if self.load_all_in_ram:
@@ -1381,295 +1597,133 @@ class HADBetasAndTargetsDatasetOld(data.Dataset):
     def load_beta(self, idx):
         betas = []
         for roi in self.rois:
-            roi_folder = f"{roi}_betas-GLMsingle_type-typeb_z=1"
+            roi_folder = roi + "_betas-GLMsingle_type-typeb_z=1"
             beta_filename = self.betas_filenames[idx].replace(
                 "ROI_FOLDER_PLACEHOLDER", roi_folder
             )
-
-            betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
+            if self.avg_reps:
+                # If npy file with average of reps exists, load it. Otherwise, average repetitions on the fly
+                if os.path.exists(os.path.join(self.betas_path, beta_filename)):
+                    betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
+                else:  # Average repetitions on the fly
+                    rep = []
+                    for r in range(self.NSD_REPS):
+                        rep.append(
+                            np.load(
+                                os.path.join(
+                                    self.betas_path, beta_filename[:-4] + f"_{r}.npy"
+                                )
+                            )
+                        )
+                    avg_reps = np.mean(rep, axis=0)
+                    betas.append(avg_reps)
+            else:
+                betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
         return np.concatenate(betas)
 
     def load_target(self, idx):
         target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
-        return target.reshape(-1) if self.flatten_targets else target
+        target = np.repeat(target[None], self.num_frames_to_simulate, axis=0)
+        if self.flatten_targets:
+            return target.reshape(-1)
+        return target
 
-    def gather_betas_filenames(self, sub: int) -> list:
-        """
-        Gathers beta filenames for the HAD dataset. Requires self.stim_names_to_use to be defined.
-        self.stim_names_to_use must be a list of HAD video names to use in this dataset,
-        typically a list of training videos or a list of test videos. Stim name example: v_Archery_id_9FFEroHG-fY_start_59.5_label_1
-        """
+    def gather_betas_impulse_filenames(self, sub: int) -> list:
         betas_filenames = []
-        for s in self.stim_names_to_use:  # Stim names to use must be a list of the HAD video names to use in this dataset, typically a list of training videos or a list of test videos. Stim name example: 'v_Archery_id_9FFEroHG-fY_start_59.5_label_1'
-            s = s.split("/")[-1].replace(".mp4", ".npy")
-            betas_filenames.append(
-                os.path.join(f"sub{sub:02d}", "indiv_npys", "ROI_FOLDER_PLACEHOLDER", s)
-            )
+
+        for i in self.stim_idxs:
+            if self.avg_reps:
+                betas_filenames.append(
+                    os.path.join(
+                        f"sub{sub:02d}",
+                        "indiv_npys_avg",
+                        "ROI_FOLDER_PLACEHOLDER",
+                        f"{i:06d}.npy",
+                    )
+                )
+            else:
+                for rep in range(self.repeat_targets):
+                    betas_filenames.append(
+                        os.path.join(
+                            f"sub{sub:02d}",
+                            "indiv_npys",
+                            "ROI_FOLDER_PLACEHOLDER",
+                            f"{i:06d}_{rep}.npy",
+                        )
+                    )
+
         return betas_filenames
 
-    def gather_target_filenames(self):
+    def gather_target_filenames(self) -> list:
         targets_filenames = []
-        for s in self.stim_names_to_use:
-            targets_filenames.append(s)
+
+        for i in self.stim_idxs:
+            for _ in range(self.repeat_targets):
+                targets_filenames.append(f"{i:06d}.npy")
+
         return targets_filenames
 
     ## Functions to load all in RAM
-    def load_all_had_betas(self):
-        """
-        Load all HAD betas in RAM.
-        Returns a list of betas, where each element is an array of betas for a given subject and ROI.
-        """
-        betas = []
-        raise NotImplementedError
+    def load_all_nsd_betas_impulse(
+        self, betas_path: str, sub: int, rois: list, avg_reps=True, subset="train"
+    ) -> None:
+        subj_betas_path = os.path.join(betas_path, f"sub{sub:02d}")
+        betas_sub = []
 
-    def load_all_target_vectors_had(self):
+        for roi in rois:
+            pkl_name = f"{roi}_betas-GLMsingle_type-typeb_z=1.pkl"
+
+            with open(
+                os.path.join(subj_betas_path, "prepared_allvoxel_pkl", pkl_name), "rb"
+            ) as f:
+                data = pkl.load(f)
+
+            if avg_reps:
+                betas_sub.append(np.mean(data["data_allvoxel"], axis=1))
+            else:
+                # Concatenate all repetitions into dim 0
+                b = np.concatenate(
+                    [
+                        data["data_allvoxel"][:, i, :]
+                        for i in range(data["data_allvoxel"].shape[1])
+                    ]
+                )
+                betas_sub.append(b)
+
+        # TODO: add noise ceiling
+
+        return np.concatenate(betas_sub, axis=1)
+
+    def load_target_vectors_nsd(
+        self,
+        path_to_target_vectors: str,
+        subject: int,
+        subset: str = "train",
+        repeat_targets=1,
+    ) -> None:
         """
-        Load all HAD target vectors in RAM.
-        Returns a list of target vectors, where each element is a target vector for a given subject.
+        Load target vectors for a given subject
         """
         targets = []
-        raise NotImplementedError
 
+        # Load training pickle
+        with open(
+            f"{self.betas_path}/sub{subject:02d}/events_imgtag-73k_id.pkl", "rb"
+        ) as f:
+            img_idxs = pkl.load(f)
 
-### --------------- NOD Datasets
+        train_list = img_idxs[0]
+        for target in train_list:
+            targets.append(np.load(f"{path_to_target_vectors}/{target-1:06d}.npy"))
 
+        targets = np.array(targets * repeat_targets)
 
-class NODImageDataset(ImageDataset):
-    """Dataset for NOD returning image stimuli."""
+        # flatten vectors
+        targets = targets.reshape(targets.shape[0], -1)
 
-    def get_video_paths(self, subset, metadata_path):
-        """Returns list of video paths for a given subset"""
-        if subset == "train":
-            self.video_paths = json.load(
-                open(os.path.join(metadata_path, "nod_train_set_video_paths.json"))
-            )
-        elif subset == "test":
-            self.video_paths = json.load(
-                open(os.path.join(metadata_path, "nod_test_set_video_paths.json"))
-            )
-        elif subset == "all":
-            video_paths_train = json.load(
-                open(os.path.join(metadata_path, "nod_train_set_video_paths.json"))
-            )
-            video_paths_test = json.load(
-                open(os.path.join(metadata_path, "nod_test_set_video_paths.json"))
-            )
-            self.video_paths = video_paths_train + video_paths_test
-        else:
-            raise ValueError(f"Unknown subset {subset}")
+        print(
+            f"Loaded {len(img_idxs[0])} NSD img_idxs for subject {subject}, starting with {img_idxs[0][0:5]}"
+        )
 
+        return targets
 
-        return self.video_paths
-
-
-class NODBetasAndTargetsDataset(data.Dataset):
-    pass
-
-### --------------- CC2017 Datasets
-
-
-class CC2017VideoDataset(VideoDataset):
-    '''Dataset for CC2017 returning video stimuli.'''
-
-    def get_video_paths(self, subset, metadata_path):
-
-        if subset == 'train':
-            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
-        elif subset == 'test':
-            self.video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
-        elif subset == 'all':
-            self.video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
-            self.video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
-            self.video_paths = self.video_paths_train + self.video_paths_test
-        else:
-            raise ValueError(f'Unknown subset {subset}')
-            
-        # print('self.video_paths', self.video_paths)
-        return self.video_paths
-
-
-class CC2017BetasAndTargetsDataset(BetasAndTargetsDataset):
-
-    @property
-    def pkl_suffix(self):
-        return "_estimates-TSTrialEstimates_z=1"
-
-    @property
-    def train_reps(self):
-        self.CC2017_TRAIN_REPS = 2
-        return self.CC2017_TRAIN_REPS
-    
-    @property
-    def test_reps(self):
-        self.CC2017_TEST_REPS = 10
-        return self.CC2017_TEST_REPS
-
-    def get_stim_names(self, subset, metadata_path):
-        if subset == 'train':
-            stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
-        elif subset == 'test':
-            stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
-        elif subset == 'all':
-            stim_names_train = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
-            stim_names_test = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
-            stim_names = stim_names_train + stim_names_test
-        else:
-            raise ValueError(f'Unknown subset {subset}')
-        
-        if stim_names[0].endswith('.mp4'):
-            stim_names = [s[:-4] for s in stim_names]
-
-        self.stim_names = stim_names
-
-        return self.stim_names
-    
-
-
-### ---- Datasets for Reconstruction
-
-class CC2017ReconstructionDataset(data.Dataset):
-    pass #TODO Finish
-
-    
-
-
-# class NSDReconstructionDataset():
-#     '''Dataset for NSD data returning conditioning vectors (either ground truth or predicted) that can be
-#     used by a diffusion model (e.g. zeroscope) to reconstruct the NSD images.'''
-
-#     def __init__(self,
-#                  cond_vectors_paths_dict,
-#                  subset='test',
-#                  return_filenames=True,
-#                  rearrange_expressions=None):
-#         '''Constructor for NSDReconstructionDataset.
-
-#         Args:
-#             cond_vectors_paths_dict (dict): dictionary with keys corresponding
-#                 to the conditioning vector name (e.g. 'z', 'blip' and 'c') and
-#                 values corresponding to the paths to the conditioning vectors folders.
-#                 The folders should either contain a large npy file with all the vectors
-#                 for a subset of NSD (e.g. preds_train) or a set of individual npy files for each NSD image (e.g. 1001.npy)
-#             subset (str): 'train' or 'test'
-#             return_filenames (bool): whether to return the filename of the conditioning vector
-#         '''
-
-#         self.cond_vectors_paths_dict = cond_vectors_paths_dict
-#         self.subset = subset
-#         self.return_filenames = return_filenames
-
-#         self.cond_vectors_to_use = list(cond_vectors_paths_dict.keys())
-#         self.large_npys = {}
-#         # Check if given path contains large singular npy files or individual npy files for each stimuli
-
-#         for cond_name, path in cond_vectors_paths_dict.items():
-#             if self.check_if_large_npys(path):
-#                 self.large_npys[cond_name] = np.load(os.path.join(path, f'preds_{subset}.npy'))
-
-#         ran = range(0,73000) # Indexes of train and test sets of NSD
-#         self.filenames = [f'{i:06d}.npy' for i in ran]
-
-
-#     def __len__(self):
-#         return len(self.filenames)
-
-#     def __getitem__(self, idx):
-
-#         ret = ()
-#         for cond_name, path in self.cond_vectors_paths_dict.items():
-#             if cond_name not in self.cond_vectors_to_use:
-#                 continue
-#             if cond_name in self.large_npys:
-#                 cond_vector = self.large_npys[cond_name][idx]
-#                 flattened_vecs = True
-#             else:
-#                 cond_vector = np.load(os.path.join(path, self.filenames[idx]))
-#                 if cond_vector.ndim == 1:
-#                     flattened_vecs = True
-#             if self.rearrange_expressions is not None and cond_name in self.rearrange_expressions and flattened_vecs:
-#                 cond_vector = rearrange(cond_vector, self.rearrange_expressions[cond_name])
-
-#         if self.return_filenames:
-#             return ret + (self.filenames[idx],)
-#         return ret
-
-
-### ---- Utility functions
-
-# def make_nsd_traintest_for_subj(subj, use_captions=False, use_fmri=False):
-#     idxs_train, idxs_test = get_nsd_idxs_for_subj(subj)
-#     train_dataset = NSDDataset(idxs_train, use_captions=use_captions, use_fmri=use_fmri)
-#     test_dataset = NSDDataset(idxs_test, use_captions=use_captions, use_fmri=use_fmri)
-#     return train_dataset, test_dataset
-
-
-
-
-### -------------- Maps
-
-# TODO transform into config files for each dataset, to make it easy to add a new one
-STIM_DATASET_MAP = {
-    'bmd': BMDVideoDataset,
-    'bmd_captions': BMDCaptionsDataset,
-    'had': HADVideoDataset,
-    'nsd': NSDImageDataset,
-    'nod': NODImageDataset,
-    'cc2017': CC2017VideoDataset,
-}
-
-BT_DATASET_MAP = {
-    'bmd': BMDBetasAndTargetsDatasetOld,
-    'bmd_captions': BMDBetasAndTargetsDatasetOld,
-    'had': HADBetasAndTargetsDatasetOld,
-    'nsd': NSDBetasAndTargetsDataset,
-    'nod': NODBetasAndTargetsDataset,
-    'cc2017': CC2017BetasAndTargetsDataset,
-}
-
-DATASET_OUTPUT_TYPES = {
-    'bmd': 'video',
-    'bmd_captions': 'text',
-    'had': 'video',
-    'nsd': 'image',
-    'nod': 'image',
-    'cc2017': 'video',
-} 
-
-DATASET_PATHS = {
-    'bmd': 
-        {'stimuli': './data/stimuli_bmd/mp4', 
-        'metadata': './data/metadata_bmd',
-        'betas': './data/betas_cifti_bmd',
-        'targets': './data/target_vectors_bmd'
-        },
-    'bmd_captions': 
-        {'stimuli': './data/stimuli_bmd/captions', 
-        'metadata': './data/metadata_bmd_captions',
-        'betas': './data/betas_cifti_bmd',
-        'targets': './data/target_vectors_bmd_captions'
-        },
-    'had': 
-        {'stimuli':'./data/stimuli_had', 
-        'metadata':'./data/metadata_had',
-        'betas':'./data/betas_cifti_had',
-        'targets':'./data/target_vectors_had'
-        },
-    'nsd': 
-        {'stimuli': './data/stimuli_nsd', 
-        'metadata': './data/metadata_nsd',
-        'betas': './data/betas_cifti_nsd',
-        'targets': './data/target_vectors_nsd'
-        },
-    'nod': 
-        {'stimuli': './data/stimuli_nod', 
-        'metadata': './data/metadata_nod',
-        'betas': './data/betas_cifti_nod',
-        'targets': './data/target_vectors_nod'
-        },
-    'cc2017': 
-        {'stimuli': './data/stimuli_cc2017', 
-        'metadata': './data/metadata_cc2017',
-        'betas': './data/betas_cifti_cc2017',
-        'targets': './data/target_vectors_cc2017'
-        },
-}

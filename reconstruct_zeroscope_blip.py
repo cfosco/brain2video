@@ -20,6 +20,14 @@ from blip import blip_decoder
 def main(args):
     # Follow vid2vid approach: https://github.com/huggingface/diffusers/blob/v0.20.0/src/diffusers/pipelines/text_to_video_synthesis/pipeline_text_to_video_synth_img2img.py
 
+    # Define Output Path
+    if args.output_path is None:
+        output_path = os.path.join('reconstructions', args.dataset+'_z:'+args.z_path.split('/')[-1]+'_blip:'+args.blip_path.split('/')[-1])
+    else:
+        output_path = args.output_path
+    print("Saving reconstructed videos to", output_path)
+    
+    
     # Load text2vid pipeline
     pipe = VideoToVideoSDPipeline.from_pretrained(
         "../zeroscope_v2_576w", torch_dtype=torch.float16
@@ -39,7 +47,7 @@ def main(args):
     if args.use_gt_vecs or args.use_gt_blip:
         args.blip_path = f"./data/target_vectors_{args.dataset}/blip"
 
-    z_blip_dataset = ReconstructionDataset(
+    z_blip_dataset = RECONSTRUCTION_DATASET_MAP[args.dataset](
         cond_vectors_paths_dict = {"z": args.z_path, "blip": args.blip_path},
         metadata_path = DATASET_PATHS[args.dataset]['metadata'],
         subset = args.set,
@@ -105,6 +113,7 @@ def main(args):
     k=0
     for z, blip_emb, filename in z_blip_dataset:
 
+ 
         z = z.cuda()
         blip_emb = blip_emb.cuda()
         filename = filename.split(".")[0]
@@ -128,7 +137,7 @@ def main(args):
 
         # captions.append(caption)
         # Save caption as txt
-        txt_path = os.path.join(args.output_path, "txt")
+        txt_path = os.path.join(output_path, "txt")
         os.makedirs(txt_path, exist_ok=True)
         with open(os.path.join(txt_path, f"{filename}_{caption[0]}.txt"), "w") as f:
             f.write(caption[0])
@@ -149,10 +158,11 @@ def main(args):
             rec_vid_frames[0].shape,
         )
 
+
         # Save reconstructed videos as mp4 and gif
-        vid_path = os.path.join(args.output_path, "mp4")
+        vid_path = os.path.join(output_path, "mp4")
         os.makedirs(vid_path, exist_ok=True)
-        gif_path = os.path.join(args.output_path, "gif")
+        gif_path = os.path.join(output_path, "gif")
         os.makedirs(gif_path, exist_ok=True)
 
         frames_to_vid(rec_vid_frames, os.path.join(vid_path, f"{filename}.mp4"), fps=5)
@@ -232,34 +242,39 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "-d",
         "--dataset",
         type=str,
         help="Dataset to reconstruct videos from. Options: bmd, bmd_captions, had, nsd, nod, cc2017",
-        
+        required=True,
     )
 
     parser.add_argument(
+        "-z",
         "--z_path",
         type=str,
-        help="Path to predicted latents npy file",
+        help="Path to predicted latents npy files",
         default="./estimated_vectors/z_zeroscope/regressor:swigluwithscheduleronval_hidden:2048_fmritype:betas_impulse_rois:BMDgeneral_avgtrainreps:False_usensd:False_sub[1]_z_zeroscope_unflattened",
     )
 
     parser.add_argument(
+        "-b",
         "--blip_path",
         type=str,
-        help="Path to predicted conditioning vectors npy file",
-        default=None
+        help="Path to predicted conditioning vectors (BLIP) npy files",
+        default="./estimated_vectors/blip/regressor:swigluwithscheduleronval_hidden:2048_fmritype:betas_impulse_rois:BMDgeneral_avgtrainreps:False_usensd:False_sub[1]_z_zeroscope_unflattened",
     )
 
     parser.add_argument(
+        "-o",
         "--output_path",
         type=str,
         help="Output path for reconstructed videos",
-        default="./reconstructions/cc2017_regressor:mlpwithscheduler_rois:Group41_testSub01_trainAllSub_feats:z_zeroscope_blip_strength:0.8",
+        default=None,
     )
 
     parser.add_argument(
+        "-s",
         "--set",
         type=str,
         help="Set to reconstruct videos from. Options: train, test",
@@ -267,24 +282,28 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "-gv",
         "--use_gt_vecs",
         action="store_true",
         help="Whether to use ground truth conditioning vectors",
     )
 
     parser.add_argument(
+        "-gz",
         "--use_gt_z",
         action="store_true",
         help="Whether to use ground truth z vectors",
     )
 
     parser.add_argument(
+        "-gb",
         "--use_gt_blip",
         action="store_true",
         help="Whether to use ground truth blip vectors",
     )
 
     parser.add_argument(
+        "-f",
         "--latent_factor",
         type=float,
         help="Factor to scale the predicted latents by",
