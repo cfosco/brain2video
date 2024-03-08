@@ -107,6 +107,130 @@ def main(args):
             save_embedding(os.path.join(args.save_path, f"{filename}.npy"), embedding)
 
 
+def main_alt(args):
+    dataset = STIM_DATASET_MAP[args.dataset](
+        args.input_path
+        if args.input_path is not None
+        else DATASET_PATHS[args.dataset]["stimuli"],
+        args.metadata_path
+        if args.metadata_path is not None
+        else DATASET_PATHS[args.dataset]["metadata"],
+        subset="all",
+        resolution=244,
+        transform=None,
+        normalize=False,
+        return_filename=True,
+        load_from_frames=args.load_from_frames,
+        skip_frames=None,
+        n_frames_per_video=1,
+    )
+
+    # dataloader = torch.utils.data.DataLoader(
+    #     dataset, batch_size=16, shuffle=False, num_workers=1
+    # )
+
+    if args.device is None:
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+
+    print("Device:", device)
+
+    if (
+        args.emb_wanted == "zeroscope_c"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "text"
+    ):
+        get_emb = ZeroscopeTextEmbeddingPipeline(device)
+        out_folder = "zeroscope_emb_77x1024"  # TODO: Double check that this is correct
+    elif (
+        args.emb_wanted == "zeroscope_c"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "image"
+    ):
+        get_emb = ZeroscopeImageEmbeddingPipeline(device, args.caption_first)
+        out_folder = "zeroscope_emb_77x1024"
+    elif (
+        args.emb_wanted == "zeroscope_c"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "video"
+    ):
+        get_emb = ZeroscopeVideoEmbeddingPipeline(device, args.caption_first)
+        out_folder = "zeroscope_emb_77x1024"
+    elif args.emb_wanted == "clip_c" and DATASET_OUTPUT_TYPES[args.dataset] == "image":
+        get_emb = CLIPImageEmbeddingPipeline(device)
+        out_folder = "clip_emb_257x1024"
+    elif args.emb_wanted == "clip_c" and DATASET_OUTPUT_TYPES[args.dataset] == "video":
+        get_emb = CLIPVideoEmbeddingPipeline(device)
+        out_folder = "clip_emb_257x1024"
+
+    elif args.emb_wanted == "svd_emb" and DATASET_OUTPUT_TYPES[args.dataset] == "video":
+        get_emb = SVDVideoEmbeddingPipeline(device)
+        out_folder = "svd_emb_1024"
+
+    elif (
+        args.emb_wanted == "svd_emb_lats"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "video"
+    ):
+        get_emb = SVDVideoEmbeddingAndLatentsPipeline(device)
+        out_folder = "svd_emb_lats_1024"
+
+    elif (
+        args.emb_wanted == "svd_emb_lats_all_frames"
+        and DATASET_OUTPUT_TYPES[args.dataset] == "video"
+    ):
+        get_emb = SVDVideoEmbeddingAndLatentsPipeline(device)
+        out_folder = "svd_emb_lats_all_frames"
+
+    if args.save_path is None:
+        args.save_path = os.path.join(
+            f"./data/target_vectors_{args.dataset}", out_folder
+        )
+
+    import random
+
+    import imageio
+
+    random.shuffle(dataset.vid_paths)
+    dataloader = enumerate(reversed(dataset))
+    for idx, (stim, filename) in tqdm(dataloader):
+        # print("Processing filenames:", filenames)
+        print("Processing filename:", filename)
+
+        print("stims.shape", stim.shape)
+        print("stims.type", type(stim))
+        print("stims max min", stim.max(), stim.min())
+        video_path = os.path.join(dataset.path, dataset.vid_paths[idx])
+        # print("Loading video", video_path)
+        if not video_path.endswith(".mp4"):
+            video_path = f"{video_path}.mp4"
+
+        # load middle frame as pil image:
+        print(f"video_path: {video_path}")
+        embeddings_path = os.path.join(args.save_path, f"{filename}.npy")
+        if os.path.exists(embeddings_path):
+            print("Embedding already exists for", filename)
+            continue
+
+        all_embs = []
+        reader = imageio.get_reader(video_path, "ffmpeg")
+        for i, frame in enumerate(reader):
+            if i % 4 != 0:
+                continue
+            stim = Image.fromarray(frame)
+            embedding = get_emb(stim)
+            all_embs.append(embedding)
+
+        embedding = torch.cat(all_embs)
+        filename = os.path.splitext(filename)[0]
+        print("Saving embedding for", filename, "at", embeddings_path)
+        save_embedding(embeddings_path, embedding)
+
+
+def load_middle_frame(video_path: str) -> Image.Image:
+    import imageio
+
+    vid = imageio.get_reader(video_path, "ffmpeg")
+    return Image.fromarray(vid.get_data(0))
+
+
 class CLIPImageEmbeddingPipeline:
     def __init__(self, device="cuda"):
         self.device = device
@@ -351,4 +475,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args)
+    main_alt(args)
