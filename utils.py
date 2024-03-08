@@ -37,7 +37,10 @@ def load_all_fmri_for_subject(path_to_subject_data: str) -> dict:
 
 
 def compute_tsne_embeddings(
-    data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = "repetitions"
+    data: dict,
+    perplexity: int = 50,
+    n_iter: int = 3000,
+    average_over: str = "repetitions",
 ) -> np.ndarray:
     """
     Compute t-sne embeddings of the data
@@ -50,7 +53,9 @@ def compute_tsne_embeddings(
     elif average_over == "voxels":
         dim = 2
     else:
-        raise ValueError('average_over must be one of "videos", "repetitions" or "voxels"')
+        raise ValueError(
+            'average_over must be one of "videos", "repetitions" or "voxels"'
+        )
 
     avg_fmri = np.mean(data["train_data"], axis=dim)
     tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, n_iter=n_iter)
@@ -60,7 +65,10 @@ def compute_tsne_embeddings(
 
 
 def t_sne_visualization(
-    data: dict, perplexity: int = 50, n_iter: int = 3000, average_over: str = "repetitions"
+    data: dict,
+    perplexity: int = 50,
+    n_iter: int = 3000,
+    average_over: str = "repetitions",
 ) -> None:
     """
     Plot t-sne visualization of the data
@@ -78,10 +86,10 @@ def t_sne_visualization(
 
 
 def transform_vids_to_gifs(
-    path_to_vids="data/stimuli/mp4", 
-    path_to_gifs="data/stimuli/gif", 
+    path_to_vids="data/stimuli/mp4",
+    path_to_gifs="data/stimuli/gif",
     size=128,
-    start_from=0
+    start_from=0,
 ):
     os.makedirs(path_to_gifs, exist_ok=True)
 
@@ -107,7 +115,9 @@ def frames_to_vid(frames, output_video_path, fps=30):
     h, w, c = frames[0].shape
 
     def write_video(codec):
-        video_writer = cv2.VideoWriter(output_video_path, codec, fps=fps, frameSize=(w, h))
+        video_writer = cv2.VideoWriter(
+            output_video_path, codec, fps=fps, frameSize=(w, h)
+        )
 
         # Check if video writer is initialized
         if not video_writer.isOpened():
@@ -144,12 +154,12 @@ def vid_to_gif(video_filepath, output_gif_filepath, size=256):
 
     # Convert to gif and save
     video_clip.write_gif(
-        output_gif_filepath, 
-        program="ffmpeg", 
-        opt="optimizeplus", 
-        fuzz=5, 
-        # verbose=False, 
-        logger=None
+        output_gif_filepath,
+        program="ffmpeg",
+        opt="optimizeplus",
+        fuzz=5,
+        # verbose=False,
+        logger=None,
     )
 
     # Optimize the gif file
@@ -184,7 +194,13 @@ def compute_metrics(targets, preds, verbose=True):
         print(f"R2: {r2}")
         print(f"Correlation: {corr}")
 
-    return {"mse": mse, "mae": mae, "r2": r2, "corr": corr}
+    return {
+        "mse": float(mse),
+        "mae": float(mae),
+        "r2": float(r2),
+        "corr": float(corr),
+    }
+
 
 def load_frames_to_npy(frame_folder, skip_frames=1):
     """Loads frames with cv2.imread and returns them as a numpy array.
@@ -199,10 +215,9 @@ def load_frames_to_npy(frame_folder, skip_frames=1):
     for i in range(0, len(frame_filenames), skip_frames):
         frame_path = os.path.join(frame_folder, frame_filenames[i])
         frame = cv2.imread(frame_path)
-        frames.append(frame) 
+        frames.append(frame)
 
     return np.stack(frames)
-
 
 
 def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268):
@@ -236,7 +251,9 @@ def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268)
         video_path = os.path.join(root_dir, video_folder)
 
         # List all frames in the current video folder
-        frames = [f for f in os.listdir(video_path) if f.endswith((".png", ".jpg", ".jpeg"))]
+        frames = [
+            f for f in os.listdir(video_path) if f.endswith((".png", ".jpg", ".jpeg"))
+        ]
 
         # Sort the frames for consistency
         frames.sort()
@@ -270,7 +287,9 @@ def preprocess_video_for_vid2vid_pipeline(video):
 
     if isinstance(video, supported_formats):
         video = [video]
-    elif not (isinstance(video, list) and all(isinstance(i, supported_formats) for i in video)):
+    elif not (
+        isinstance(video, list) and all(isinstance(i, supported_formats) for i in video)
+    ):
         raise ValueError(
             f"Input is in incorrect format: {[type(i) for i in video]}. Currently, we only support {', '.join(supported_formats)}"
         )
@@ -279,7 +298,11 @@ def preprocess_video_for_vid2vid_pipeline(video):
         video = [np.array(frame) for frame in video]
 
     if isinstance(video[0], np.ndarray):
-        video = np.concatenate(video, axis=0) if video[0].ndim == 5 else np.stack(video, axis=0)
+        video = (
+            np.concatenate(video, axis=0)
+            if video[0].ndim == 5
+            else np.stack(video, axis=0)
+        )
 
         if video.dtype == np.uint8:
             video = np.array(video).astype(np.float32) / 255.0
@@ -290,7 +313,11 @@ def preprocess_video_for_vid2vid_pipeline(video):
         video = torch.from_numpy(video.transpose(0, 4, 1, 2, 3))
 
     elif isinstance(video[0], torch.Tensor):
-        video = torch.cat(video, axis=0) if video[0].ndim == 5 else torch.stack(video, axis=0)
+        video = (
+            torch.cat(video, axis=0)
+            if video[0].ndim == 5
+            else torch.stack(video, axis=0)
+        )
 
         # don't need any preprocess if the video is latents
         channel = video.shape[1]
@@ -333,7 +360,6 @@ def print_current_gpu_memory():
     )
 
 
-
 def norm_and_transp(img, minus_1_to_1=True):
     if minus_1_to_1:
         return (np.array(img).transpose(2, 0, 1) / 255.0) * 2.0 - 1.0
@@ -341,8 +367,8 @@ def norm_and_transp(img, minus_1_to_1=True):
         return np.array(img).transpose(2, 0, 1) / 255.0
 
 
-
 ### PLOTTING FUNCTIONS
+
 
 def plot_video(video, frames_to_skip=1):
     """
@@ -352,5 +378,5 @@ def plot_video(video, frames_to_skip=1):
     for i, frame in enumerate(video[::frames_to_skip]):
         plt.subplot(4, 4, i + 1)
         plt.imshow(frame)
-        plt.axis('off')
+        plt.axis("off")
     plt.show()
