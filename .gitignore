@@ -208,3 +208,5 @@ data/**/*.pkl
 data/stimuli_mp4.tar.gz
 data/stimuli/
 test_outputs
+mbm_encoder
+notebooks/zero_shot_figs.ipynb

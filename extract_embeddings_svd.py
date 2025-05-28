@@ -19,6 +19,8 @@ from svd import CustomStableVideoDiffusionPipeline
 
 
 def main(args):
+
+
     dataset = STIM_DATASET_MAP[args.dataset](
         args.input_path
         if args.input_path is not None
@@ -87,6 +89,8 @@ def main(args):
         args.save_path = os.path.join(
             f"./data/target_vectors_{args.dataset}", out_folder
         )
+
+    print("Will save embeddings at", args.save_path)
 
     for stims, filenames in tqdm(dataloader):
         print("Processing filenames:", filenames)
@@ -378,6 +382,7 @@ class SVDVideoEmbeddingPipeline:
             "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
             torch_dtype=torch.float16,
             variant="fp16",
+            token='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'
         )
         self.pipe.enable_model_cpu_offload()
 
@@ -404,6 +409,7 @@ class SVDVideoEmbeddingAndLatentsPipeline:
                 "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
                 torch_dtype=torch.float16,
                 variant="fp16",
+                token='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'
             )
         )
         self.pipe.enable_model_cpu_offload()

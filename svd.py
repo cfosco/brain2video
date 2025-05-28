@@ -7,7 +7,7 @@ from diffusers.pipelines.stable_video_diffusion import (
 )
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import (
     _append_dims,
-    tensor2vid,
+    # tensor2vid,
 )
 from diffusers.utils import export_to_video, load_image
 from diffusers.utils.torch_utils import randn_tensor
@@ -317,7 +317,8 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             if needs_upcasting:
                 self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
-            frames = tensor2vid(frames, self.image_processor, output_type=output_type)
+            # frames = tensor2vid(frames, self.image_processor, output_type=output_type)
+            frames = self.video_processor.postprocess_video(video=frames, output_type=output_type) # Update to diffusers 28.2 - tensor2vid replaced by video_processor
         else:
             frames = latents
 
@@ -576,7 +577,9 @@ class CustomStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             if needs_upcasting:
                 self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
-            frames = tensor2vid(frames, self.image_processor, output_type=output_type)
+            # frames = tensor2vid(frames, self.image_processor, output_type=output_type)
+            frames = self.video_processor.postprocess_video(video=frames, output_type=output_type) # Update to diffusers 28.2 - tensor2vid replaced by video_processor
+
         else:
             frames = latents
 

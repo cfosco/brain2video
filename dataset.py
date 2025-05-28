@@ -191,6 +191,211 @@ class ImageDataset(data.Dataset, abc.ABC):
 class CaptionsDataset(data.Dataset, abc.ABC):
     pass
 
+
+class MBMAndTargetsDataset(data.Dataset, abc.ABC):
+
+    def __init__(
+        self, 
+        mbm_path,
+        targets_path,
+        metadata_path,
+        bundle_reps=False,
+        avg_reps=False,
+        subs=[1],
+        subset="train",
+        load_all_in_ram=False,
+        use_noise_ceiling=True,
+        return_filename=False,
+        flatten_targets=True,
+    ):
+        """
+        Constructor for MBMAndTargetsDataset.
+
+
+        Args:
+            mbm_path (str): path to mbm embeddings.
+                This path should point to a folder containing subject subfolders called sub01, sub02, etc. 
+                Each subfolder should contain a list of numpy files with the suffix _rep{rep}.npy.
+            targets_path (str): path to target vectors, e.g. data/target_vectors_bmd/z_zeroscope
+            metadata_path (str): path to metadata
+            bundle_reps (bool): If True, returns all repetitions by stacking them in an additional dimension. 
+                Needs individual repetition numpys to contain the suffix _rep{rep}.npy. If false, the dataset will return individual repetitions.
+            subs (list): list of subjects to include
+            subset (str): 'train', 'test' or 'both'
+            load_all_in_ram (bool): whether to load all data in RAM. If False, data will be loaded on the fly
+            use_noise_ceiling (bool): whether to multiply features by noise ceiling
+            return_filename (bool): whether to return the filename of the video
+            flatten_targets (bool): whether to flatten target vectors
+        """
+
+        assert not (subset=='all' and bundle_reps==True and avg_reps==False), 'Cannot returned bundled repetitions when subset is all because of the different number of reps between train and test'
+
+        self.mbm = []
+        self.targets = []
+        self.mbm_filenames = []
+        self.targets_filenames = []
+
+        self.mbm_path = mbm_path
+        self.targets_path = targets_path
+        self.bundle_reps = bundle_reps
+        self.avg_reps = avg_reps
+        self.subs = subs
+        self.subset = subset
+        self.load_all_in_ram = load_all_in_ram
+        self.use_noise_ceiling = use_noise_ceiling
+        self.return_filename = return_filename
+        self.flatten_targets = flatten_targets
+
+        self.stim_names = self.get_stim_names(subset, metadata_path)
+        self.named_reps_per_stim_name = self.get_reps_for_each_stim_name(self.stim_names)
+        
+        print(len(self.stim_names), "stimuli in", subset, "set")
+
+        for sub in subs:
+            if load_all_in_ram:
+                self.mbm = self.load_all_mbm()
+                self.targets = self.load_all_target_vectors()
+            else:
+                self.mbm_filenames.extend(self.get_mbm_paths(sub))
+                self.targets_filenames.extend(self.get_target_paths(sub))
+
+    @property
+    @abc.abstractmethod
+    def pkl_suffix(self):
+        """Returns suffix to compose the pkl name"""
+        raise NotImplementedError
+    
+    @property
+    @abc.abstractmethod
+    def train_reps(self):
+        """Returns number of repetitions in training data"""
+        raise NotImplementedError
+
+    @property
+    @abc.abstractmethod
+    def test_reps(self):
+        """Returns number of repetitions in test data"""
+        raise NotImplementedError
+    
+    @abc.abstractmethod
+    def get_stim_names(self, subset, metadata_path):
+        """Returns list of stimuli paths for a given subset"""
+        raise NotImplementedError
+
+    def get_reps_for_each_stim_name(self, stim_names):
+        """Returns a dict with the number of repetitions for each filename"""
+        named_reps_per_stim_name = {}
+        for stim_name in stim_names:
+            named_reps_per_stim_name[stim_name] = []
+            for npy_file in os.listdir(os.path.join(self.mbm_path, f"sub{self.subs[0]:02d}", "indiv_npys", "mbm"+self.pkl_suffix)): 
+                if stim_name in npy_file:
+                    named_reps_per_stim_name[stim_name].append(os.path.splitext(npy_file)[0])   
+            named_reps_per_stim_name[stim_name] = sorted(named_reps_per_stim_name[stim_name])
+        return named_reps_per_stim_name
+
+    def __len__(self):
+        if self.load_all_in_ram:
+            return len(self.mbm)
+        else:
+            return len(self.mbm_filenames)
+
+    def __getitem__(self, idx):
+        if self.load_all_in_ram:
+            ret = (self.mbm[idx], self.targets[idx])
+        else:
+            mbm = self.load_mbm(idx)
+            target = self.load_target(idx)
+            ret = (mbm, target)
+
+        if self.return_filename:
+            ret = ret + (self.mbm_filenames[idx], self.targets_filenames[idx])
+
+        return ret
+
+    def load_mbm(self, idx):
+        if self.bundle_reps or self.avg_reps: # Stack reps as an additional dimension.
+            mbms = []
+            for name in self.named_reps_per_stim_name[self.stim_names[idx]]:
+                mbm_filename = self.finalize_mbm_filename(self.mbm_filenames[idx], rep=name)
+                mbms.append(np.load(os.path.join(self.mbm_path, mbm_filename)))
+            if self.avg_reps:
+                mbm = np.mean(mbms, axis=0) 
+            else:
+                mbm = np.stack(mbms) 
+        else:
+            mbm_filename = self.finalize_mbm_filename(self.mbm_filenames[idx])
+            mbm = np.load(os.path.join(self.mbm_path, mbm_filename))
+        
+        return mbm
+
+    def finalize_mbm_filename(self, f, rep=None):
+        f = f.replace("MBM_FOLDER_PLACEHOLDER", "mbm"+self.pkl_suffix)
+
+        if type(rep) is int:
+            f = f.replace(".npy", f"_rep{rep}.npy")
+        elif type(rep) is str:
+            f = f.replace(os.path.basename(f), rep)
+        return f
+
+    def load_target(self, idx):
+        target = np.load(os.path.join(self.targets_path, self.targets_filenames[idx]))
+        return target.reshape(-1) if self.flatten_targets else target
+
+    def get_mbm_paths(self, subject):
+        mbm_filenames = []
+        for name in self.stim_names:
+            name = name.split('/')[-1]
+            if self.bundle_reps or self.avg_reps:
+                mbm_filenames.append(
+                    os.path.join(
+                        f"sub{subject:02d}",
+                        "indiv_npys",
+                        "MBM_FOLDER_PLACEHOLDER",
+                        f"{name}.npy",
+                    )
+                )
+            else:
+                for name in self.named_reps_per_stim_name[name]:
+                    mbm_filenames.append(
+                        os.path.join(
+                            f"sub{subject:02d}",
+                            "indiv_npys",
+                            "MBM_FOLDER_PLACEHOLDER",
+                            f"{name}.npy",
+                        )
+                    )
+        return mbm_filenames
+
+    def get_target_paths(self, subject):
+        """Gathers filenames for target vectors."""
+        targets_filenames = []
+
+        for n in self.stim_names:
+            if self.bundle_reps:
+                targets_filenames.append(f"{n}.npy")
+            else:
+                for _ in range(len(self.named_reps_per_stim_name[n])):
+                    targets_filenames.append(f"{n}.npy")
+
+        return targets_filenames
+
+    def load_all_mbm(self):
+        """Load all MBM vectors into memory"""
+        all_mbm = []
+        for idx in range(len(self.mbm_filenames)):
+            all_mbm.append(self.load_mbm(idx))
+        return all_mbm
+    
+    def load_all_target_vectors(self):
+        """Load all target vectors into memory"""
+        all_targets = []
+        for idx in range(len(self.targets_filenames)):
+            all_targets.append(self.load_target(idx))
+        return all_targets
+
+
+    
+
 class BetasAndTargetsDataset(data.Dataset, abc.ABC):
     
     def __init__(
@@ -228,7 +433,7 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
             flatten_targets (bool): whether to flatten target vectors
         """
 
-        assert ~(subset=='all' and bundle_reps==True and avg_reps==False), 'Cannot returned bundled repetitions when subset is all because of the different number of reps between train and test'
+        assert not (subset=='all' and bundle_reps==True and avg_reps==False), 'Cannot returned bundled repetitions when subset is all because of the different number of reps between train and test'
 
         self.betas = []
         self.targets = []
@@ -248,8 +453,16 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
         self.flatten_targets = flatten_targets
 
         self.stim_names = self.get_stim_names(subset, metadata_path)
+        self.named_reps_per_stim_name = self.get_reps_for_each_stim_name(self.stim_names)
 
-        self.n_reps = self.train_reps if subset == 'train' else self.test_reps
+        print(len(self.stim_names), "stimuli in", subset, "set")
+
+        # if subset == 'train':
+        #     self.n_reps = self.train_reps
+        # elif subset == 'test':
+        #     self.n_reps = self.test_reps
+        # elif subset == 'all':
+        #     self.n_reps = None
 
         for sub in subs:
             if load_all_in_ram:
@@ -258,9 +471,6 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
             else:
                 self.betas_filenames.extend(self.get_betas_paths(sub))
                 self.targets_filenames.extend(self.get_target_paths(sub))
-
-        if self.bundle_reps or self.avg_reps:
-            self.reps_per_stim_name = self.get_reps_for_each_stim_name(self.stim_names)
 
 
     @property
@@ -286,19 +496,16 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
         """Returns list of stimuli paths for a given subset"""
         raise NotImplementedError
 
-    def get_reps_for_each_stim_name(self, stim_names, dummy_roi='Group41'):
+    def get_reps_for_each_stim_name(self, stim_names): #, stim_names, dummy_roi='Group41'):
         """Returns a dict with the number of repetitions for each filename"""
-        reps_per_filename = {}
-        for f in self.betas_filenames:
-            f = self.finalize_beta_filename(f, dummy_roi)
-            stim_name = os.path.splitext(os.path.basename(f))[0]
-            reps_per_filename[stim_name] = []
-            for npy_file in os.listdir(os.path.join(self.betas_path, os.path.dirname(f))):
+        named_reps_per_stim_name = {}
+        for stim_name in stim_names:
+            named_reps_per_stim_name[stim_name] = []
+            for npy_file in os.listdir(os.path.join(self.betas_path, f"sub{self.subs[0]:02d}", "indiv_npys", self.rois[0]+self.pkl_suffix)): 
                 if stim_name in npy_file:
-                    reps_per_filename[stim_name].append(npy_file)
-            reps_per_filename[stim_name] = sorted(reps_per_filename[stim_name])
-        # print(reps_per_filename)
-        return reps_per_filename
+                    named_reps_per_stim_name[stim_name].append(os.path.splitext(npy_file)[0])   
+            named_reps_per_stim_name[stim_name] = sorted(named_reps_per_stim_name[stim_name])
+        return named_reps_per_stim_name
 
     def __len__(self):
         if self.load_all_in_ram:
@@ -321,21 +528,21 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
         return ret
 
     def load_beta(self, idx):
+        # print("Loading beta", idx)
         betas = []
         if self.bundle_reps or self.avg_reps: # Stack reps as an additional dimension. Needs individual repetition numpys to contain the suffix _rep{rep}.npy
-            for rep in self.reps_per_stim_name[self.stim_names[idx]]:
+            for name in self.named_reps_per_stim_name[self.stim_names[idx]]:
                 conc_rois = [] 
                 for roi in self.rois:
-                    beta_filename = self.finalize_beta_filename(self.betas_filenames[idx], roi, rep=rep)
+                    beta_filename = self.finalize_beta_filename(self.betas_filenames[idx], roi, rep=name)
                     conc_rois.append(np.load(os.path.join(self.betas_path, beta_filename)))
                 betas.append(np.concatenate(conc_rois))
             if self.avg_reps:
-                betas = np.mean(betas, axis=0)
+                betas = np.mean(betas, axis=0) # betas is a 1-d numpy vector with shape (n_betas,)
             else:
                 betas = np.stack(betas) # betas is a 2-d numpy vector with shape (n_reps, n_betas)
         else:
             for roi in self.rois:
-                # print(self.betas_filenames[idx])
                 beta_filename = self.finalize_beta_filename(self.betas_filenames[idx], roi)
                 betas.append(np.load(os.path.join(self.betas_path, beta_filename)))
             betas = np.concatenate(betas) # betas is a 1-d numpy vector with shape (n_betas,)     
@@ -357,27 +564,28 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
 
 
     def get_betas_paths(self, subject):
-
         betas_filenames = []
-        for n in self.stim_names:
-            n = n.split('/')[-1]
+        for name in self.stim_names:
+            name = name.split('/')[-1]
             if self.bundle_reps or self.avg_reps:
                 betas_filenames.append(
                     os.path.join(
                         f"sub{subject:02d}",
                         "indiv_npys",
                         "ROI_FOLDER_PLACEHOLDER",
-                        f"{n}.npy",
+                        f"{name}.npy",
                     )
                 )
             else:
-                for rep in range(self.n_reps):
+                # print("not bundling or averaging reps. Will add individual reps to the betas_flenames list. self.named_reps_per_stim_name[n]", self.named_reps_per_stim_name[name])
+                for name in self.named_reps_per_stim_name[name]: #range(self.n_reps):
+
                     betas_filenames.append(
                         os.path.join(
                             f"sub{subject:02d}",
                             "indiv_npys",
                             "ROI_FOLDER_PLACEHOLDER",
-                            f"{n}_rep{rep}.npy",
+                            f"{name}.npy",
                         )
                     )
         return betas_filenames
@@ -391,7 +599,7 @@ class BetasAndTargetsDataset(data.Dataset, abc.ABC):
             if self.bundle_reps:
                 targets_filenames.append(f"{n}.npy")
             else:
-                for _ in range(self.n_reps):
+                for _ in range(len(self.named_reps_per_stim_name[n])):
                     targets_filenames.append(f"{n}.npy")
 
         return targets_filenames
@@ -446,15 +654,15 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
     def __getitem__(self, idx):
         ret = ()
         for cond_name, path in self.cond_vectors_paths_dict.items():
-            print("cond_name", cond_name)
-            print("path", path)
+            # print("cond_name", cond_name)
+            # print("path", path)
             if cond_name not in self.cond_vectors_to_use:
                 continue
             if cond_name in self.large_npys:
                 cond_vector = self.large_npys[cond_name][idx]
                 is_flat = True
             else:
-                print("self.filenames[idx]", self.filenames[idx])
+                # print("self.filenames[idx]", self.filenames[idx])
                 cond_vector = np.load(os.path.join(path, self.filenames[idx]+'.npy')).squeeze()
                 
                 if cond_vector.ndim == 1:
@@ -462,16 +670,16 @@ class ReconstructionDataset(data.Dataset, abc.ABC):
                 else:
                     is_flat = False
 
-            print(f"{cond_name}.shape before rearrange", cond_vector.shape)
+            # print(f"{cond_name}.shape before rearrange", cond_vector.shape)
             if cond_name in self.rearrange_funcs and is_flat:
                 cond_vector = self.rearrange_funcs[cond_name](cond_vector)
 
-            # TODO: Improve. Currently needing this swapaxes for z because they are saved as [15,4,3,33] (frames first) and they should be of shape (4,15,33,33) (channels first) for zeroscope to interpret them correctly
-            if cond_name == "z" and cond_vector.shape[0] == 15:
-                cond_vector = cond_vector.swapaxes(0, 1)
+            # UPDATE: swapaxes not needed anymore for BMD # TODO: Improve. Currently needing this swapaxes for z because they are saved as [15,4,3,33] (frames first) and they should be of shape (4,15,33,33) (channels first) for zeroscope to interpret them correctly
+            # if cond_name == "z" and cond_vector.shape[0] == 15:
+            #     cond_vector = cond_vector.swapaxes(0, 1)
 
             
-            print("final cond_vector.shape", cond_vector.shape)
+            # print("final cond_vector.shape", cond_vector.shape)
             cond_vector = torch.tensor(cond_vector).float()
             ret = ret + (cond_vector,)
 
@@ -517,7 +725,7 @@ class BMDVideoDataset(VideoDataset):
             vid_paths = [f'{i:04d}{suffix}' for i in range(1,1001)]
         elif subset == 'test':
             vid_paths = [f'{i:04d}{suffix}' for i in range(1001,1103)]
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             vid_paths = [f'{i:04d}{suffix}' for i in range(1,1103)]
         else: 
             raise ValueError(f'Unknown subset {subset}')
@@ -552,9 +760,11 @@ class BMDBetasAndTargetsDataset(BetasAndTargetsDataset):
         elif subset == 'test':
             stim_names = [f'{i:04d}' for i in range(1001, 1103)]
             self.n_reps = self.test_reps
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             stim_names = [f'{i:04d}' for i in range(1, 1103)]
             self.n_reps = self.train_reps
+        else:
+            raise ValueError(f'Unknown subset {subset}')
 
         return stim_names    
 
@@ -566,8 +776,10 @@ class BMDReconstructionDataset(ReconstructionDataset):
             stim_names = [f'{i:04d}' for i in range(1, 1001)]
         elif subset == 'test':
             stim_names = [f'{i:04d}' for i in range(1001, 1103)]
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             stim_names = [f'{i:04d}' for i in range(1, 1103)]
+        else:
+            raise ValueError(f'Unknown subset {subset}')
 
         return stim_names    
 
@@ -583,7 +795,7 @@ class CC2017VideoDataset(VideoDataset):
             video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
         elif subset == 'test':
             video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
             video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
             video_paths = video_paths_train + video_paths_test
@@ -618,7 +830,7 @@ class CC2017BetasAndTargetsDataset(BetasAndTargetsDataset):
             stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
         elif subset == 'test':
             stim_names = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             stim_names_train = json.load(open(os.path.join(metadata_path, 'cc2017_train_set_video_paths.json')))
             stim_names_test = json.load(open(os.path.join(metadata_path, 'cc2017_test_set_video_paths.json')))
             stim_names = stim_names_train + stim_names_test
@@ -641,7 +853,7 @@ class CC2017ReconstructionDataset(ReconstructionDataset):
             video_paths = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
         elif subset == 'test':
             video_paths = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json'))) #
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             video_paths_train = json.load(open(os.path.join(metadata_path,'cc2017_train_set_video_paths.json')))
             video_paths_test = json.load(open(os.path.join(metadata_path,'cc2017_test_set_video_paths.json')))
             video_paths = video_paths_train + video_paths_test
@@ -673,7 +885,7 @@ class HADVideoDataset(VideoDataset):
             video_paths = json.load(
                 open(os.path.join(metadata_path, "had_test_set_video_paths.json"))
             )
-        elif subset == "all":
+        elif subset == "all" or subset == "both":
             video_paths_train = json.load(
                 open(os.path.join(metadata_path, "had_train_set_video_paths.json"))
             )
@@ -722,7 +934,7 @@ class HADBetasAndTargetsDataset(BetasAndTargetsDataset):
             )
             for sub in self.subs:
                 video_paths.extend(test_set[f'sub{sub:02d}'])
-        elif subset == "all":
+        elif subset == "all" or subset == "both":
             train_set = json.load(
                 open(os.path.join(metadata_path, "had_train_set_per_subject.json"))
             )
@@ -755,7 +967,7 @@ class HADReconstructionDataset(ReconstructionDataset):
             video_paths = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
         elif subset == 'test':
             video_paths = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json'))) #
-        elif subset == 'all':
+        elif subset == 'all' or subset == 'both':
             video_paths_train = json.load(open(os.path.join(metadata_path,'had_train_set_video_paths.json')))
             video_paths_test = json.load(open(os.path.join(metadata_path,'had_test_set_video_paths.json')))
             video_paths = video_paths_train + video_paths_test
@@ -786,7 +998,7 @@ class NODImageDataset(ImageDataset):
             self.video_paths = json.load(
                 open(os.path.join(metadata_path, "nod_test_set_video_paths.json"))
             )
-        elif subset == "all":
+        elif subset == "all" or subset == "both":
             video_paths_train = json.load(
                 open(os.path.join(metadata_path, "nod_train_set_video_paths.json"))
             )

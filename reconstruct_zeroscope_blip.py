@@ -13,12 +13,20 @@ from utils import vid_to_gif, frames_to_vid
 import sys
 from dataset import *
 
-sys.path.append("./blip/models")
+# sys.path.append1
+sys.path.append('./blip/models')
 from blip import blip_decoder
 
 
 def main(args):
     # Follow vid2vid approach: https://github.com/huggingface/diffusers/blob/v0.20.0/src/diffusers/pipelines/text_to_video_synthesis/pipeline_text_to_video_synth_img2img.py
+
+    # Define device
+    if args.gpu is not None:
+        device = f"cuda:{args.gpu}"
+    else:
+        device = "cpu"
+
 
     # Define Output Path
     if args.output_path is None:
@@ -30,17 +38,19 @@ def main(args):
     
     # Load text2vid pipeline
     pipe = VideoToVideoSDPipeline.from_pretrained(
-        "../zeroscope_v2_576w", torch_dtype=torch.float16
+        # "../zeroscope_v2_576w", 
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '../zeroscope_v2_576w')),
+        torch_dtype=torch.float16
     )
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-    pipe.to("cuda")
+    pipe.to(device)
 
     # Load BLIP model
     print("Loading BLIP model")
     model_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth"
     blip_deco = blip_decoder(pretrained=model_url, image_size=240, vit="base")
     blip_deco.eval()
-    blip_deco = blip_deco.to("cuda")
+    blip_deco = blip_deco.to(device)
 
     if args.use_gt_vecs or args.use_gt_z:
         args.z_path = f"./data/target_vectors_{args.dataset}/z_zeroscope"
@@ -77,7 +87,7 @@ def main(args):
 
     # Reshape latents to expected shape: (b c f w h) with c = 4, f = 15
     # z = rearrange(z, 'b (f c w h) -> b c f w h', f=15, c=4, w=33, h=33)
-    # z = torch.tensor(z).float().cuda()
+    # z = torch.tensor(z).float().cuda(device)
     # print('z.shape',z.shape)
 
     # # Load conditioning vectors
@@ -90,7 +100,7 @@ def main(args):
 
     # # Reshape cond vectors
     # c = rearrange(c, 'b (k l) -> b k l', k=77)
-    # c = torch.tensor(c).float().cuda()
+    # c = torch.tensor(c).float().cuda(device)
     # print('c.shape', c.shape)
 
     # Load BLIP vectors
@@ -103,26 +113,28 @@ def main(args):
 
     # # Reshape BLIP vectors
     # blip_embeds = rearrange(blip_embeds, 'b (k l) -> b k l', k=226, l=768)
-    # blip_embeds = torch.tensor(blip_embeds).float().cuda()
+    # blip_embeds = torch.tensor(blip_embeds).float().cuda(device)
     # print('blip_embeds.shape', blip_embeds.shape)
 
     # captions = []
 
     # for i in range(len(z)):
 
-    k=0
     for z, blip_emb, filename in z_blip_dataset:
-
  
-        z = z.cuda()
-        blip_emb = blip_emb.cuda()
+        z = z.float().cuda(device)
+        blip_emb = blip_emb.float().cuda(device)
         filename = filename.split(".")[0]
+
+        # show blip_emb dtype
+        # print("blip_emb dtype", blip_emb.dtype)
+        # print('z.shape', z.shape)
 
         # Get captions
         print("Generating captions")
         caption = embeds_to_captions(
             blip_deco,
-            device="cuda",
+            device=device,
             image_embeds=blip_emb[None],
             num_beams=1,
             max_length=20,
@@ -308,6 +320,14 @@ if __name__ == "__main__":
         type=float,
         help="Factor to scale the predicted latents by",
         default=1.0,
+    )
+
+    parser.add_argument(
+        "-g",
+        "--gpu",
+        type=int,
+        help="GPU to use. If None, use CPU.",
+        default=0,
     )
 
     args = parser.parse_args()

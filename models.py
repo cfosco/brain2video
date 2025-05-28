@@ -241,7 +241,7 @@ class SwiGLURegressor(nn.Module, NNMixIn):
             self,
             in_features,
             out_features=None,
-            hidden_size=None,
+            hidden_features=None,
             act_layer=nn.SiLU,
             norm_layer=nn.BatchNorm1d,
             bias=True,
@@ -439,6 +439,64 @@ class SwiGLURegressor(nn.Module, NNMixIn):
     #             else:
     #                 preds_all = torch.cat([preds_all, preds], dim=0)
     #     return preds_all
+
+
+class ResidualBlock(nn.Module):
+    """Residual Block with two linear layers, batch normalization, and dropout"""
+    def __init__(self, dim, dropout_p):
+        super(ResidualBlock, self).__init__()
+        self.linear1 = nn.Linear(dim, dim)
+        self.bn1 = nn.BatchNorm1d(dim)
+        self.dropout1 = nn.Dropout(dropout_p)
+
+        self.linear2 = nn.Linear(dim, dim)
+        self.bn2 = nn.BatchNorm1d(dim)
+        self.dropout2 = nn.Dropout(dropout_p)
+
+        self.activation = nn.GELU()
+
+    def forward(self, x):
+        identity = x
+        out = self.linear1(x)
+        out = self.bn1(out)
+        out = self.activation(out)
+        out = self.dropout1(out)
+
+        out = self.linear2(out)
+        out = self.bn2(out)
+        out = self.activation(out)
+        out = self.dropout2(out)
+
+        out += identity
+        return out
+
+
+
+class MLPRegressorResidual(nn.Module, NNMixIn):
+    """MLP Regressor with residual blocks"""
+    def __init__(self, input_dim, output_dim, hidden_dim=2048, dropout_p=0.3):
+        super(MLPRegressor, self).__init__()
+        self.input_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout_p)
+        )
+
+        self.residual_blocks = nn.Sequential(
+            ResidualBlock(hidden_dim, dropout_p),
+            ResidualBlock(hidden_dim, dropout_p),
+            ResidualBlock(hidden_dim, dropout_p)
+        )
+
+        self.output_layer = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.residual_blocks(x)
+        x = self.output_layer(x)
+        return x
+
 
 
 

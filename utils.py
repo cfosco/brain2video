@@ -112,8 +112,13 @@ def transform_vids_to_gifs(
 
 
 def frames_to_vid(frames, output_video_path, fps=30):
+    frames = frames.squeeze()
     h, w, c = frames[0].shape
 
+    # print("in frames_to_vid: frames type", frames.dtype)
+    # print("in frames_to_vid: frames shape", frames.shape)
+    # print("frames max and min", frames.max(), frames.min())
+    
     def write_video(codec):
         video_writer = cv2.VideoWriter(
             output_video_path, codec, fps=fps, frameSize=(w, h)
@@ -124,7 +129,15 @@ def frames_to_vid(frames, output_video_path, fps=30):
             raise ValueError("Video writer could not be initialized.")
 
         for frame in frames:
+            # Ensure the frame is in the correct format
+            if frame.dtype != 'uint8':
+                frame = (frame * 255).astype('uint8')
             img = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # plt.imshow(img)
+            # plt.show()
+            # # save frame
+            # plt.imsave('frame.png', img)
+            # write to video_writer
             video_writer.write(img)
         video_writer.release()
 
@@ -133,11 +146,23 @@ def frames_to_vid(frames, output_video_path, fps=30):
         fourcc_avc1 = cv2.VideoWriter_fourcc(*"avc1")
         write_video(fourcc_avc1)
         print("Video written using avc1 codec.")
-    except Exception:
-        # If that fails, fall back to mp4v codec
-        fourcc_mp4v = cv2.VideoWriter_fourcc(*"mp4v")
-        write_video(fourcc_mp4v)
-        print("Video written using mp4v codec.")
+    except Exception as e:
+        print(f"avc1 codec failed: {e}")
+        try:
+            # If avc1 fails, fall back to mp4v codec
+            fourcc_mp4v = cv2.VideoWriter_fourcc(*"mp4v")
+            write_video(fourcc_mp4v)
+            print("Video written using mp4v codec.")
+        except Exception as e:
+            print(f"mp4v codec failed: {e}")
+            try:
+                # If mp4v also fails, fall back to MJPG codec
+                fourcc_mjpg = cv2.VideoWriter_fourcc(*"MJPG")
+                write_video(fourcc_mjpg)
+                print("Video written using MJPG codec.")
+            except Exception as e:
+                print(f"MJPG codec failed: {e}")
+                raise ValueError("All codecs failed. Video could not be written.")
 
 
 def vid_to_gif(video_filepath, output_gif_filepath, size=256):
@@ -173,51 +198,106 @@ def prompt_list_from_boldmoments_annots(annots):
     pass
 
 
-def compute_metrics(targets, preds, verbose=True):
-    # Compute MSE
-    mse = np.mean(np.mean((targets - preds) ** 2, axis=0))
-
-    # Compute MAE
-    mae = np.mean(np.mean(np.abs(targets - preds), axis=0))
-
-    # Compute R2
-    ssr = np.sum((targets - preds) ** 2, axis=0)
-    sst = np.sum((targets - np.mean(targets, axis=0)) ** 2, axis=0)
-    r2 = np.mean(1 - (ssr / sst))
-
-    # Compute correlation score
-    corr = correlation_score(targets.T, preds.T).mean().item()
-
-    if verbose:
-        print(f"MSE: {mse}")
-        print(f"MAE: {mae}")
-        print(f"R2: {r2}")
-        print(f"Correlation: {corr}")
-
-    return {
-        "mse": float(mse),
-        "mae": float(mae),
-        "r2": float(r2),
-        "corr": float(corr),
-    }
-
-
-def load_frames_to_npy(frame_folder, skip_frames=1):
+def load_frames_to_npy(frame_folder, step_frames=1, size=256):
     """Loads frames with cv2.imread and returns them as a numpy array.
     Frames are in BGR format.
 
     Args:
     - frame_folder (str): Path to the folder containing the frames.
-    - skip_frames (int): Number of frames to skip between each frame.
+    - step_frames (int): step size for loading frames. 1 means that every frame is loaded. 2 means that we skip one frame in between each loaded frame.
     """
     frames = []
     frame_filenames = os.listdir(frame_folder)
-    for i in range(0, len(frame_filenames), skip_frames):
+    for i in range(0, len(frame_filenames), step_frames):
         frame_path = os.path.join(frame_folder, frame_filenames[i])
         frame = cv2.imread(frame_path)
+        frame = cv2.resize(frame, (size, size))
         frames.append(frame)
 
     return np.stack(frames)
+
+def load_mp4_to_npy(video_path, step_frames=1, frames_to_load=None, size=256, v=False):
+    """
+    Loads frames from a video file by reading all available frames and then sampling.
+    
+    Args:
+        video_path (str): Path to the video file.
+        step_frames (int): Legacy parameter, kept for backward compatibility.
+        frames_to_load (int): Number of frames to return after sampling.
+        size (int): Size to resize frames to (size x size).
+        v (bool): Verbose mode for debugging.
+    
+    Returns:
+        np.ndarray: Array of loaded frames with shape (num_frames, height, width, channels)
+    """
+    import os
+    import cv2
+    import numpy as np
+    
+    if v:
+        print(f"Loading video: {video_path}")
+    
+    # Check file existence
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video file: {video_path}. Check if OpenCV supports the codec.")
+    
+    # Read all frames first
+    all_frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Convert to RGB and resize
+        try:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.resize(frame, (size, size))
+            all_frames.append(frame)
+        except Exception as e:
+            print(f"Error processing frame: {e}")
+            continue
+    
+    cap.release()
+    
+    if len(all_frames) == 0:
+        raise ValueError(f"Failed to read any frames from {video_path}")
+    
+    if v:
+        print(f"Successfully read {len(all_frames)} frames from video")
+    
+    # Sample frames if needed
+    if frames_to_load is not None:
+        if frames_to_load > len(all_frames):
+            if v:
+                print(f"Warning: Requested {frames_to_load} frames but video only has {len(all_frames)}")
+            
+            # Duplicate last frame if we don't have enough
+            while len(all_frames) < frames_to_load:
+                all_frames.append(all_frames[-1])
+                
+            if v:
+                print(f"Duplicated last frame to reach {len(all_frames)} frames")
+        
+        elif frames_to_load < len(all_frames):
+            # Uniform sampling to get exactly frames_to_load frames
+            indices = np.linspace(0, len(all_frames)-1, frames_to_load, dtype=int)
+            wanted_frames = [all_frames[i] for i in indices]
+            
+            if v:
+                print(f"Sampled {frames_to_load} frames uniformly from {len(all_frames)} frames")
+    
+    else:
+        # use step_frames to sample frames
+        wanted_frames = all_frames[::step_frames]
+        if v:
+            print(f"Sampled {len(wanted_frames)} frames with step size {step_frames} from {len(all_frames)} frames")
+
+    return np.stack(wanted_frames)
 
 
 def load_frames_to_tensor(root_dir, batch_size=8, n_frames_to_load=45, size=268):

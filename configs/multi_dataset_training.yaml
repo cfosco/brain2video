@@ -2,39 +2,41 @@
 target: blip
 
 train_on:
+  - bmd
   - cc2017
 
 test_on:
-  - cc2017
   - bmd
+  - cc2017
 
+input_type: # one of ['betas', 'mbm_embs']
+  - mbm_embs 
 
 rois:
 - Group41
 
 subs:
 - 1
-- 2
+
+subs_to_test_on: null # Defaults to subs
+
+
+mlp:
+  hidden_size: 4096
+
+swiglu:
+  hidden_size: 4096
 
 avg_train_reps: False
+avg_test_reps: False
 bundle_reps: False
 batch_size: 512
 regressor: swiglu
-
-mlp:
-  hidden_size: 2048
-
-swiglu:
-  hidden_size: 2048
-
-
-
-
-training_hyperparameters:
-  batch_size: 32
-  learning_rate: 0.0001
-  epochs: 100
-  patience: 10
-  min_delta: 0.001
-  loss: binary_crossentropy
-  optimizer: adam
+learning_rate: 0.0001
+epochs: 1
+patience: 2
+loss: binary_crossentropy
+optimizer: adamw
+l1_lambda: 1e-5
+l2_lambda: 1e-4
+criterion: smoothl1 
