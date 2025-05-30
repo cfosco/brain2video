@@ -3,7 +3,7 @@ Repo for the Brain2Video reconstruction project
 
 The main objective is to reconstruct videos as accurately as possible from fMRI data of participants watching the video. We use the BOLDMoments dataset for our main experiments.
 
-Our approach essentially attempts to regress conditioning and latent embeddings from fMRI that can then be fed to a pretrained Text2Video or Video2Video generation model to obtain a representation of what the user was seeing.
+Our approach essentially attempts to regress conditioning and latent embeddings from fMRI that can then be fed to a pretrained Text2Video or Video2Video generation model to obtain a representation of what the user was seeing. 
 
 ## Download data
 Use `download_data.py` to download the BOLDMoments data if you have an MIT kerberos account.
