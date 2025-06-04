@@ -22,7 +22,7 @@ from dataset import *
 def main(args):  
 
     # Build dataset and dataloader
-    dataset = DATASET_MAP[args.dataset](
+    dataset = STIM_DATASET_MAP[args.dataset](
                 args.input_path if args.input_path is not None else DATASET_PATHS[args.dataset]['stimuli'], 
                 args.metadata_path if args.metadata_path is not None else DATASET_PATHS[args.dataset]['metadata'],
                 subset='all',
@@ -67,7 +67,7 @@ def main(args):
 
 class ZeroscopeLatentEmbeddingPipeline():
     def __init__(self, device="cuda", return_flattened=False):
-        self.pipe = DiffusionPipeline.from_pretrained("../zeroscope_v2_576w", torch_dtype=torch.float16)
+        self.pipe = DiffusionPipeline.from_pretrained("cerspense/zeroscope_v2_576w", torch_dtype=torch.float16)
         self.pipe = self.pipe.to(device)
         self.device = device
         self.return_flattened = return_flattened

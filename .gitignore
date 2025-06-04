@@ -37,6 +37,7 @@ cache/
 prompt-to-prompt/
 dump
 bokeh_plot.html
+*.DS_Store
 
 # Generations
 oracle_gens/*

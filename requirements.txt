@@ -1,0 +1,16 @@
+diffusers
+einops
+himalaya
+h5py
+ipython
+matplotlib
+moviepy
+nibabel
+opencv-python
+pandas
+pillow
+pycocotools
+torch
+torchvision
+tqdm
+numpy

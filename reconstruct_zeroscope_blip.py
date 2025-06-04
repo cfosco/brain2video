@@ -15,7 +15,7 @@ from dataset import *
 
 # sys.path.append1
 sys.path.append('./blip/models')
-from blip import blip_decoder
+from blip.models.blip import blip_decoder
 
 
 def main(args):

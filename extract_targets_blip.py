@@ -2,12 +2,11 @@
 
 import argparse
 import os
-import pickle as pkl
 import torch
 from tqdm import tqdm
 import sys
 sys.path.append("./blip/models")
-from blip import blip_decoder
+from blip.models.blip import blip_decoder
 from utils import save_vectors_npy
 from PIL import Image
 import numpy as np
@@ -17,7 +16,7 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 
 from dataset import *
-from dataset import DATASET_MAP, DATASET_PATHS
+from dataset import STIM_DATASET_MAP, DATASET_PATHS
 
 
 # TODO: Refactor this repeating code from all the extract_ scripts
@@ -26,7 +25,7 @@ def main(args):
     res = 240
 
     # Build dataset and dataloader
-    dataset = DATASET_MAP[args.dataset](
+    dataset = STIM_DATASET_MAP[args.dataset](
                 args.input_path if args.input_path is not None else DATASET_PATHS[args.dataset]['stimuli'], 
                 args.metadata_path if args.metadata_path is not None else DATASET_PATHS[args.dataset]['metadata'],
                 subset='all',

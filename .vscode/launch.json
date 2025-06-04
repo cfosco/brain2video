@@ -1,0 +1,29 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "extract blip targets",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/data/vision/torralba/selfmanaged/oliva/u/blahner/projects/brain2video/extract_targets_blip.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "cc2017",
+            ]
+        },
+        {
+            "name": "extract zeroscope targets",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/data/vision/torralba/selfmanaged/oliva/u/blahner/projects/brain2video/extract_targets_zeroscope.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "bmd",
+            ]
+        }
+    ]
+}

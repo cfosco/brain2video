@@ -7,8 +7,11 @@ import numpy as np
 import PIL
 import torch
 from himalaya.scoring import correlation_score
-from moviepy.editor import VideoFileClip
-from moviepy.video.fx.all import speedx
+#from moviepy import VideoFileClip
+from moviepy import * # Simple and nice, the __all__ is set in moviepy so only useful things will be loaded
+from moviepy import VideoFileClip
+#from moviepy.video.fx.all import speedx
+#from moviepy import *
 from PIL import Image
 from sklearn.manifold import TSNE
 from tqdm import tqdm
@@ -170,13 +173,12 @@ def vid_to_gif(video_filepath, output_gif_filepath, size=256):
 
     # Load the video
     video_clip = VideoFileClip(video_filepath)
-
+    video_clip.with_speed_scaled(factor=4)
     # Speed up clip (reduces frames)
-    video_clip = speedx(video_clip, factor=4)
-
+    #video_clip = video_clip.fx(vfx.speedx, factor=4)
+    #video_clip = speedx(video_clip, factor=4)
     # Reduce resolution
-    video_clip = video_clip.resize(height=size)
-
+    video_clip = video_clip.resized(height=size)
     # Convert to gif and save
     video_clip.write_gif(
         output_gif_filepath,
