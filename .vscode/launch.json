@@ -24,6 +24,17 @@
             "args": [
                 "--dataset", "bmd",
             ]
+        },
+        {
+            "name": "regression training",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/data/vision/torralba/selfmanaged/oliva/u/blahner/projects/brain2video/regress.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config", "configs/multi_dataset_training.yaml",
+                "--target", "blip"
+            ]
         }
     ]
 }

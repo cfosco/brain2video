@@ -6,11 +6,14 @@ ipython
 matplotlib
 moviepy
 nibabel
+omegaconf
 opencv-python
 pandas
 pillow
 pycocotools
+scikit-image
 torch
+torhcmetrics
 torchvision
 tqdm
 numpy
